@@ -1,0 +1,188 @@
+clc
+close all
+clear all
+
+%% Initialization
+
+net = importKerasNetwork('modelRegression.h5')
+load('means.mat')
+load('stds.mat')
+
+%Constants
+chip_rate = 1.023e6;   %In Hz
+Fs = 2.5e6;             %In Hz
+fD = 0;             % In Hz
+shift_Tc = 0.5;    %max shift, in chips
+CNR_dB = 35;        % in dB-Hz
+runs = 1000;    % # runs
+n_multipath = 7; %Number of Multipath Components
+plotFlag = false;   %Set to plot
+NNErrorFlag = true; %Set to use NNDLL
+delta_shift_codes = 2;  %Delta Codes used as input to DLL
+delta_shift_samples = round(delta_shift_codes*Fs/chip_rate);
+
+samplesPerCode = floor(Fs/chip_rate*1023);
+t = (0:samplesPerCode-1)/Fs;
+t_plot = t*Fs;
+%t_p = (1:2*delta_shift)/Fs - delta_shift/Fs;
+
+
+%Initialization
+[CAcode19, code19] = generate_PRN(3,6);     %for PRN 19
+
+%Resampling the PRNs
+code19 = resample_PRN(code19,samplesPerCode,chip_rate,Fs,0);
+
+
+%Initializing training data matrices
+ShiftsData = zeros(runs,1); %Errros from the center of the MDLL
+SamplesData = zeros(runs,2*delta_shift_samples);
+Data = zeros(runs,size(ShiftsData,2) + size(SamplesData,2));
+
+
+
+sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
+Tc = 1/chip_rate;
+C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
+%%
+shift_center = 500;
+if (plotFlag)
+    figure;
+end
+for n = 1:runs
+    %% Run Initialization
+    clc;
+    n/runs*100
+  
+    noise1 = sigma_noise*randn(1,samplesPerCode);
+    noise2 = sigma_noise*randn(1,samplesPerCode);
+    noise = noise1 + 1i*noise2;
+    
+    shift = shift_Tc/chip_rate*Fs*(rand-0.5);
+    ShiftsData(n) = round(shift);
+    
+    %Shifting PRNs
+    code19_d = circshift(code19,round(shift)+shift_center);
+    code19_Multipath = 0;
+    
+    for ii = 1:n_multipath
+        multipath_shift_samples = gamrnd(2.56,65.12)/3e8*Fs;
+        theta =pi/sqrt(3)*randn;
+        a = -0.0032;b = -12.3;  %Linear Model for Attenuation
+        Att_db = a*(multipath_shift_samples)/Fs*1e3 + b;
+        
+        A_M = 1*10^(Att_db/20);
+        code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19,round(shift + multipath_shift_samples)+shift_center);
+    end
+    thetas = 2*pi*fD*t;
+
+    y = code19_d + code19_Multipath + noise;% + code25_d + code5_d;
+    A = 1;
+    y = y.*A.^0.5.*exp(-1i*thetas);
+
+    R = Corr(y,code19.*exp(1i*thetas))./length(y);
+    R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(1i*thetas))./length(y);
+    R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(1i*thetas))./length(y);
+    SamplesData(n,:) = R_Actual(shift_center-delta_shift_samples+1:shift_center+delta_shift_samples);
+    
+    %% DLL
+    B_DLL = 1;
+    
+    delta_shift_DLL = round(Fs/chip_rate/2);
+    prompt_PRN = circshift(code19,shift_center);
+    early_PRN = circshift(code19, shift_center - delta_shift_DLL);
+    late_PRN = circshift(code19, shift_center + delta_shift_DLL);
+    
+    c_prompt = sum(prompt_PRN.*y.*exp(2*1i*pi*fD*t))./length(code19_d);
+    c_early = sum(early_PRN.*y.*exp(2*1i*pi*fD*t))./length(code19_d);
+    c_late = sum(late_PRN.*y.*exp(2*1i*pi*fD*t))./length(code19_d);
+    
+    L_t = (real(c_prompt)*(real(c_early) - real(c_late)) + imag(c_prompt)*(imag(c_early) - imag(c_late)));
+    e_t = C*L_t;
+    shift_DLL_samples(n) = round(-e_t*Fs);
+    DLLError(n) = ShiftsData(n) - shift_DLL_samples(n);
+    %%
+
+    %% Prediction
+    if (NNErrorFlag)
+        %NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
+        %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
+        NNShift(n) = double(predict(net,real(SamplesData(n,:))));
+        NNError(n) = ShiftsData(n) - NNShift(n);
+    end
+    %%
+    if (plotFlag)
+        %% Plot
+        %Plot Actual
+        subplot(3,1,1)
+        plot(t_plot,real(R_Actual))
+        xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
+        xline(shift);
+        if (NNErrorFlag)
+           xline(shift_center + NNShift(n),'g');
+           xline(shift_center + shift_DLL_samples(n),'r');
+        end
+        xlabel('Shifts in Code')
+        ylabel('Correlation Power')
+        title('Line of Sight Signal')
+        legend('Correlation','Prompt Shift','Estimated Prompt (NN)','Estimated Prompt (DLL)')
+
+        %ylim([0,0.3])
+
+        %Plot Multipath
+        subplot(3,1,2)
+        plot(t_plot,real(R_M))
+        xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
+        xline(shift);
+        xlabel('Shifts in Code')
+        ylabel('Correlation Power')
+        title('Multipath Signal')
+        legend('Correlation')
+
+
+        %ylim([0,0.3])
+
+
+        %Plot Total
+        subplot(3,1,3)
+        hold off
+        plot(t_plot,real(R),'b')
+        xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
+        xline(shift);
+        if (NNErrorFlag)
+           xline(shift_center + NNShift(n),'g');
+           xline(shift_center + shift_DLL_samples(n),'r');
+        end
+        hold on
+
+        plot(shift_center + shift_DLL_samples(n) - delta_shift_DLL,...
+            real(R(shift_center + shift_DLL_samples(n) - delta_shift_DLL + 1)),'r*')
+        plot(shift_center + shift_DLL_samples(n) + delta_shift_DLL,...
+            real(R(shift_center + shift_DLL_samples(n) + delta_shift_DLL + 1)),'r*')
+        plot(shift_center + shift_DLL_samples(n),...
+            real(R(shift_center + shift_DLL_samples(n)+1)),'r*')
+        xlabel('Shifts in Code')
+        ylabel('Correlation Power')
+        title('Received Signal')
+        legend('Correlation','Prompt Shift','Estimated Prompt (NN)','Estimated Prompt (DLL)','Early - Prompt - Late')
+
+        %%
+        drawnow
+       
+    end
+end
+if (NNErrorFlag)
+    NN_RMSE = norm(NNError)/sqrt(runs)/Fs*3e8
+end
+DLL_RMSE = norm(DLLError)/sqrt(runs)/Fs*3e8
+
+Data = [real(SamplesData),ShiftsData];
+csvwrite('Data.csv',Data);
+
+%%
+% clear X Y
+% for i = 1:length(Data)
+%     X(1,1:40,1,i) = Data(i,1:40);
+%     Y(1,1,1,i) = Data(i,41);
+% end
+% 
