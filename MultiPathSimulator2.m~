@@ -5,12 +5,15 @@ clear all
 %% Initialization
 
 %net = importKerasNetwork('modelRegression.h5')
-load('means.mat')
-load('stds.mat')
-load('fDmat.mat')
+%load('means.mat')  %Used for scaling inputs to NN
+%load('stds.mat')
+load('fDmat.mat')   % In Hz
+%load('sat_poss.mat')
+load('pseudoranges.mat')    % In meters
+sat = 9;
 
 %fDs = fDmat(6,:);
-fDs = fDmat(1,:);
+fDs = fDmat(sat,:);
 
 %Constants
 chip_rate = 1.023e6;   %In Hz
@@ -20,9 +23,9 @@ shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
 runs = 500;    % # runs
 n_multipath = 7; %Number of Multipath Components
-plotFlag = true;   %Set to plot
+plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
-EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
+EstimateDoppler = true; %Set to use PLL to estimate doppler frequency
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
 
@@ -57,7 +60,7 @@ sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
-shift_center = 500;
+shift_center = 500; %Estimated Shift
 if (plotFlag)
     figure;
 end
@@ -67,8 +70,9 @@ for n = 1:runs
     clc;
     n/runs*100
     
+    code_shift = mod(pseudoranges(sat,n),300e3)/3e8
+    
     fD = fDs(n);
-    %fD = 0;
   
     noise1 = sigma_noise*randn(1,samplesPerCode);
     noise2 = sigma_noise*randn(1,samplesPerCode);
@@ -105,9 +109,9 @@ for n = 1:runs
     A = 1;
     y = y.*A.^0.5.*exp(-1i*thetas);
 
-    R = Corr(y,code19.*exp(1i*thetashat))./length(y);
-    R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(1i*thetashat))./length(y);
-    R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(1i*thetashat))./length(y);
+    R = Corr(y,code19.*exp(-1i*thetashat))./length(y);
+    R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
+    R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
     SamplesData(n,:) = R_Actual(shift_center-delta_shift_samples+1:shift_center+delta_shift_samples);
     
     %% DLL
@@ -126,12 +130,11 @@ for n = 1:runs
     e_t = C*L_t;
     shift_DLL_samples(n) = round(-e_t*fs);
     
-    prompt_PRN = circshift(code19,shift_center + shift_DLL_samples(n));
-    c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    c_prompt1 = sum(prompt_PRN.*y.*exp(1i*thetas))./length(code19_d);
-
-    I_Data(n) = real(c_prompt);
-    I_Data1(n) = real(c_prompt1);
+    %prompt_PRN = circshift(code19,shift_center + shift_DLL_samples(n));
+    %c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
+    %c_prompt1 = sum(prompt_PRN.*y.*exp(1i*thetas))./length(code19_d);
+    %I_Data(n) = real(c_prompt);
+    %I_Data1(n) = real(c_prompt1);
 
 
     
@@ -152,9 +155,9 @@ for n = 1:runs
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
         %NNShift(n) = double(predict(net,real(SamplesData(n,:))));
         NNError(n) = ShiftsData(n) - NNShift(n);
-        prompt_PRN = circshift(code19,shift_center + round(NNError(n)));
-        c_promptNN = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-        I_DataNN(n) = real(c_promptNN);
+        %prompt_PRN = circshift(code19,shift_center + round(NNError(n)));
+        %_promptNN = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
+        %I_DataNN(n) = c_promptNN;
 
     end
     %%

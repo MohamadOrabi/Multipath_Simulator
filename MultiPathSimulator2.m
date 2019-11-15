@@ -5,12 +5,15 @@ clear all
 %% Initialization
 
 %net = importKerasNetwork('modelRegression.h5')
-load('means.mat')
-load('stds.mat')
-load('fDmat.mat')
+%load('means.mat')  %Used for scaling inputs to NN
+%load('stds.mat')
+load('fDmat.mat')   % In Hz
+%load('sat_poss.mat')
+load('pseudoranges.mat')    % In meters
+sat = 9;
 
 %fDs = fDmat(6,:);
-fDs = fDmat(1,:);
+fDs = fDmat(sat,:);
 
 %Constants
 chip_rate = 1.023e6;   %In Hz
@@ -57,7 +60,7 @@ sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
-shift_center = 500;
+shift_center = 500; %Estimated Shift
 if (plotFlag)
     figure;
 end
@@ -66,6 +69,8 @@ for n = 1:runs
     %% Run Initialization
     clc;
     n/runs*100
+    
+    code_shift = round(mod(pseudoranges(sat,n),300e3)/3e8*fs);
     
     fD = fDs(n);
   

@@ -36,7 +36,7 @@ for nn = 1:length(constellations)
     end
     if url_flag
         file_path = [current_dir,const_name,'_',time_stamp];
-        websave(file_path, tle_url);
+        %websave(file_path, tle_url);
         file_path = [file_path, '.txt'];
     else
         path_listings = dir([archived_dir, const_name,'_*']);
@@ -46,7 +46,7 @@ for nn = 1:length(constellations)
             file_path = [archived_dir, path_listings(1).name];
         end
     end
-%     file_path='data/Archived/Orbcomm1_5_Sep_2018_18_10.txt';
+    %file_path='data/Archived/Orbcomm1_5_Sep_2018_18_10.txt';
     file_path='GPS-7-31-2019.txt';
 
     fid = fopen(file_path, 'rb');
