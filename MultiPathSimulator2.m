@@ -12,8 +12,11 @@ load('fDmat.mat')   % In Hz
 load('pseudoranges.mat')    % In meters
 sat = 9;
 
+pseudorange(sat,:) = interpolatevec(pseudoranges(sat,:));
+fDs = interpolatevec(fDmat(sat,:));
+
 %fDs = fDmat(6,:);
-fDs = fDmat(sat,:);
+%fDs = fDmat(sat,:);
 
 %Constants
 chip_rate = 1.023e6;   %In Hz
@@ -21,8 +24,8 @@ fs = 2.5e6;             %In Hz
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 500;    % # runs
-n_multipath = 7; %Number of Multipath Components
+runs = 60000;    % # runs
+n_multipath = 0; %Number of Multipath Components
 plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = true; %Set to use PLL to estimate doppler frequency
@@ -60,7 +63,8 @@ sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
-shift_center = 500; %Estimated Shift
+shift_center = 0; %Estimated Shift
+code_shift_hat = round(shift_center + mod(pseudorange(sat,1),300e3)/3e8*fs); % Initial Value 
 if (plotFlag)
     figure;
 end
@@ -70,7 +74,8 @@ for n = 1:runs
     clc;
     n/runs*100
     
-    code_shift = round(mod(pseudoranges(sat,n),300e3)/3e8*fs);
+    code_shift(n) = mod(pseudorange(sat,n),300e3)/3e8*fs;   %This might cause a problem
+    
     
     fD = fDs(n);
   
@@ -78,7 +83,8 @@ for n = 1:runs
     noise2 = sigma_noise*randn(1,samplesPerCode);
     noise = noise1 + 1i*noise2;
     
-    shift = shift_Tc/chip_rate*fs*(rand-0.5);
+    %shift = shift_Tc/chip_rate*fs*(rand-0.5);
+    shift = mod(code_shift(n)-1,samplesPerCode) + 1;
     ShiftsData(n) = round(shift);
     
     %Shifting PRNs
@@ -112,23 +118,24 @@ for n = 1:runs
     R = Corr(y,code19.*exp(-1i*thetashat))./length(y);
     R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
     R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
-    SamplesData(n,:) = R_Actual(shift_center-delta_shift_samples+1:shift_center+delta_shift_samples);
+    SamplesData(n,:) = R_Actual(code_shift_hat-delta_shift_samples+1:code_shift_hat+delta_shift_samples);
     
     %% DLL
     B_DLL = 1;
     
     delta_shift_DLL = round(fs/chip_rate/2);
-    prompt_PRN = circshift(code19,shift_center);
-    early_PRN = circshift(code19, shift_center - delta_shift_DLL);
-    late_PRN = circshift(code19, shift_center + delta_shift_DLL);
+    prompt_PRN = circshift(code19,round(code_shift_hat));
+    early_PRN = circshift(code19, round(code_shift_hat) - delta_shift_DLL);
+    late_PRN = circshift(code19, round(code_shift_hat) + delta_shift_DLL);
     
     c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
     c_early = sum(early_PRN.*y.*exp(1i*thetashat))./length(code19_d);
     c_late = sum(late_PRN.*y.*exp(1i*thetashat))./length(code19_d);
     
     L_t = (real(c_prompt)*(real(c_early) - real(c_late)) + imag(c_prompt)*(imag(c_early) - imag(c_late)));
-    e_t = C*L_t;
+    e_t = B_DLL*C*L_t;
     shift_DLL_samples(n) = round(-e_t*fs);
+    code_shift_hat = code_shift_hat + shift_DLL_samples(n);
     
     %prompt_PRN = circshift(code19,shift_center + shift_DLL_samples(n));
     %c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
@@ -138,7 +145,7 @@ for n = 1:runs
 
 
     
-    DLLError(n) = ShiftsData(n) - shift_DLL_samples(n);
+    DLLError(n) = ShiftsData(n) - code_shift_hat;
     %% PLL
     if EstimateDoppler
         u(n) = -atan(imag(c_prompt)./real(c_prompt));
@@ -152,6 +159,7 @@ for n = 1:runs
     %% Prediction
     if (NNErrorFlag)
         NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
+        %code_shift_hat = code_shift_hat + round(NNShift(n));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
         %NNShift(n) = double(predict(net,real(SamplesData(n,:))));
         NNError(n) = ShiftsData(n) - NNShift(n);
@@ -166,11 +174,11 @@ for n = 1:runs
         %Plot Actual
         subplot(3,1,1)
         plot(t_plot,real(R_Actual))
-        xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
+        %xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
         xline(shift);
         if (NNErrorFlag)
-           xline(shift_center + NNShift(n),'g');
-           xline(shift_center + shift_DLL_samples(n),'r');
+           %xline(shift_center + NNShift(n),'g');
+           xline(code_shift_hat,'r');
         end
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -197,7 +205,7 @@ for n = 1:runs
         subplot(3,1,3)
         hold off
         plot(t_plot,real(R),'b')
-        xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
+        xlim([code_shift_hat-delta_shift_samples,code_shift_hat+delta_shift_samples]);
         xline(shift);
         if (NNErrorFlag)
            xline(shift_center + NNShift(n),'g');
@@ -205,12 +213,19 @@ for n = 1:runs
         end
         hold on
 
-        plot(shift_center + shift_DLL_samples(n) - delta_shift_DLL,...
-            real(R(shift_center + shift_DLL_samples(n) - delta_shift_DLL + 1)),'r*')
-        plot(shift_center + shift_DLL_samples(n) + delta_shift_DLL,...
-            real(R(shift_center + shift_DLL_samples(n) + delta_shift_DLL + 1)),'r*')
-        plot(shift_center + shift_DLL_samples(n),...
-            real(R(shift_center + shift_DLL_samples(n)+1)),'r*')
+%         plot(shift_center + shift_DLL_samples(n) - delta_shift_DLL,...
+%             real(R(shift_center + shift_DLL_samples(n) - delta_shift_DLL + 1)),'r*')
+%         plot(shift_center + shift_DLL_samples(n) + delta_shift_DLL,...
+%             real(R(shift_center + shift_DLL_samples(n) + delta_shift_DLL + 1)),'r*')
+%         plot(shift_center + shift_DLL_samples(n),...
+%             real(R(shift_center + shift_DLL_samples(n)+1)),'r*')
+        plot(code_shift_hat - delta_shift_DLL,...
+            real(R(code_shift_hat - delta_shift_DLL + 1)),'r*')
+        plot(code_shift_hat + delta_shift_DLL,...
+            real(R(code_shift_hat + delta_shift_DLL + 1)),'r*')
+        plot(code_shift_hat,...
+            real(R(code_shift_hat + 1)),'g*')
+
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
         title('Received Signal')
@@ -230,9 +245,7 @@ Data = [real(SamplesData),ShiftsData];
 csvwrite('Data.csv',Data);
 
 %%
-% clear X Y
-% for i = 1:length(Data)
-%     X(1,1:40,1,i) = Data(i,1:40);
-%     Y(1,1,1,i) = Data(i,41);
-% end
-% 
+
+load('pseudoranges.mat')    % In meters
+
+
