@@ -4,9 +4,11 @@ clear all
 
 %% Initialization
 
-%net = importKerasNetwork('modelRegression.h5')
-load('means.mat')
-load('stds.mat')
+net = importKerasNetwork('modelRegression.h5')
+%net = importKerasLayers('modelRegression.h5','ImportWeights',true);
+
+%load('means.mat')
+%load('stds.mat')
 load('fDmat.mat')
 
 %fDs = fDmat(6,:);
@@ -22,7 +24,7 @@ runs = 500;    % # runs
 n_multipath = 7; %Number of Multipath Components
 plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
-EstimateDoppler = true; %Set to use PLL to estimate doppler frequency
+EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
 
@@ -42,6 +44,7 @@ code19 = resample_PRN(code19,samplesPerCode,chip_rate,fs,0);
 %Initializing training data matrices
 ShiftsData = zeros(runs,1); %Errros from the center of the MDLL
 SamplesData = zeros(runs,2*delta_shift_samples);
+SamplesData_noiseless = zeros(runs,2*delta_shift_samples);  %This is used for the autoencoder
 Data = zeros(runs,size(ShiftsData,2) + size(SamplesData,2));
 
 if EstimateDoppler
@@ -73,7 +76,7 @@ for n = 1:runs
     noise2 = sigma_noise*randn(1,samplesPerCode);
     noise = noise1 + 1i*noise2;
     
-    shift = shift_Tc/chip_rate*fs*(rand-0.5);
+    shift = shift_Tc/chip_rate*fs*(2*(rand-0.5));
     ShiftsData(n) = round(shift);
     
     %Shifting PRNs
@@ -107,7 +110,9 @@ for n = 1:runs
     R = Corr(y,code19.*exp(-1i*thetashat))./length(y);
     R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
     R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
-    SamplesData(n,:) = R_Actual(shift_center-delta_shift_samples+1:shift_center+delta_shift_samples);
+    SamplesData(n,:) = R(shift_center-delta_shift_samples+1:shift_center+delta_shift_samples);
+    %SamplesData(n,:) = R(shift_center-delta_shift_samples:shift_center+delta_shift_samples);
+
     
     %% DLL
     B_DLL = 1;
@@ -148,8 +153,9 @@ for n = 1:runs
     if (NNErrorFlag)
         NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
-        %NNShift(n) = double(predict(net,real(SamplesData(n,:))));
+        NNShift_Keras(n) = double(predict(net,real(SamplesData(n,:))));
         NNError(n) = ShiftsData(n) - NNShift(n);
+        NNError_Keras(n) = ShiftsData(n) - NNShift_Keras(n);
         %prompt_PRN = circshift(code19,shift_center + round(NNError(n)));
         %_promptNN = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
         %I_DataNN(n) = c_promptNN;
@@ -165,7 +171,9 @@ for n = 1:runs
         xline(shift);
         if (NNErrorFlag)
            xline(shift_center + NNShift(n),'g');
-           xline(shift_center + shift_DLL_samples(n),'r');
+           xline(shift_center + shift_DLL_samples(n),'r');           
+           xline(shift_center + NNShift_Keras(n),'b');
+
         end
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -217,6 +225,7 @@ for n = 1:runs
     end
 end
 if (NNErrorFlag)
+    NN_Keras_RMSE = norm(NNError_Keras)/sqrt(runs)/fs*3e8
     NN_RMSE = norm(NNError)/sqrt(runs)/fs*3e8
 end
 DLL_RMSE = norm(DLLError)/sqrt(runs)/fs*3e8
