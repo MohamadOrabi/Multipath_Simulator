@@ -4,14 +4,15 @@ clear all
 
 %% Initialization
 
-net = importKerasNetwork('modelRegression.h5')
+net = importKerasNetwork('modelRegression.h5') %Imports the Keras network
 %load('means.mat')  %Used for scaling inputs to NN
 %load('stds.mat')
 load('fDmat.mat')   % In Hz
 %load('sat_poss.mat')
 load('pseudoranges.mat')    % In meters
-sat = 9;
+sat = 9;    %Do not change now!
 
+% Interpolating fD and pseudorange
 pseudorange(sat,:) = interpolatevec(pseudoranges(sat,:));
 fDs = interpolatevec(fDmat(sat,:));
 
@@ -19,14 +20,15 @@ fDs = interpolatevec(fDmat(sat,:));
 %fDs = fDmat(sat,:);
 
 %Constants
+c = 299792458;
 chip_rate = 1.023e6;   %In Hz
 fs = 2.5e6;             %In Hz
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 6000;    % # runs
-n_multipath = 0; %Number of Multipath Components
-plotFlag = false;   %Set to plot
+runs = 60000;    % # code_lengths to process
+n_multipath = 7; % Number of Multipath Components
+plotFlag = false;   %Set to plot.. plotting now is currently very slow
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = true; %Set to use PLL to estimate doppler frequency
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
@@ -50,6 +52,7 @@ ShiftsData = zeros(runs,1); %Errros from the center of the MDLL
 SamplesData = zeros(runs,2*delta_shift_samples);
 Data = zeros(runs,size(ShiftsData,2) + size(SamplesData,2));
 
+%Initialize state space representation of PLL
 if EstimateDoppler
     B_PLL = 50;
     [AA BB CC DD] = PLL_getss(B_PLL,fs);
@@ -58,14 +61,14 @@ if EstimateDoppler
     phasehat = 0;
 end
 
-
 sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
-%%
+
+%Initialize the Estimated variables
 shift_center = 0; %Estimated Shift
-code_shift_hat_DLL = round(shift_center + mod(pseudorange(sat,1),300e3)/3e8*fs); % Initial Value 
-code_shift_hat_NN = round(shift_center + mod(pseudorange(sat,1),300e3)/3e8*fs); % Initial Value 
+code_shift_hat_DLL = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
+code_shift_hat_NN = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
 
 if (plotFlag)
     figure;
@@ -76,11 +79,11 @@ for n = 1:runs
     clc;
     n/runs*100
     
-    code_shift(n) = mod(pseudorange(sat,n),300e3)/3e8*fs;   %This might cause a problem
-    
+    %Calculate code_shift from pseudorange(n)
+    code_shift(n) = mod(pseudorange(sat,n),300e3)/c*fs;   %This might cause a problem
     
     fD = fDs(n);
-  
+    
     noise1 = sigma_noise*randn(1,samplesPerCode);
     noise2 = sigma_noise*randn(1,samplesPerCode);
     noise = noise1 + 1i*noise2;
@@ -93,8 +96,9 @@ for n = 1:runs
     code19_d = circshift(code19,round(shift)+shift_center);
     code19_Multipath = 0;
     
+    %Generate Multipath Signals
     for ii = 1:n_multipath
-        multipath_shift_samples = gamrnd(2.56,65.12)/3e8*fs;
+        multipath_shift_samples = gamrnd(2.56,65.12)/c*fs;
         theta =pi/sqrt(3)*randn;
         a = -0.0032;b = -12.3;  %Linear Model for Attenuation
         Att_db = a*(multipath_shift_samples)/fs*1e3 + b;
@@ -138,15 +142,6 @@ for n = 1:runs
     e_t = B_DLL*C*L_t;
     shift_DLL_samples(n) = round(-e_t*fs);
     code_shift_hat_DLL = code_shift_hat_DLL + 1*shift_DLL_samples(n);
-    pr_DLL(n) = n*1e-3 + code_shift_hat_DLL;
-    
-    %prompt_PRN = circshift(code19,shift_center + shift_DLL_samples(n));
-    %c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    %c_prompt1 = sum(prompt_PRN.*y.*exp(1i*thetas))./length(code19_d);
-    %I_Data(n) = real(c_prompt);
-    %I_Data1(n) = real(c_prompt1);
-
-
     
     DLLError(n) = ShiftsData(n) - code_shift_hat_DLL;
     %% PLL
@@ -161,8 +156,8 @@ for n = 1:runs
 
     %% Prediction
     if (NNErrorFlag)
-        NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
-        %NNShift(n) = double(predict(net,real(SamplesData(n,:))));
+        %NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
+        NNShift(n) = double(predict(net,real(SamplesData(n,:))));
         code_shift_hat_NN = code_shift_hat_NN + round(NNShift(n)) + 0*1e-3*fDhat/1575.42e6;
         %code_shift_hat = code_shift_hat + round(NNShift(n));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
@@ -194,7 +189,7 @@ for n = 1:runs
         %Plot Multipath
         subplot(3,1,2)
         plot(t_plot,real(R_M))
-        xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
+        xlim([code_shift_hat_DLL-delta_shift_samples,code_shift_hat_DLL+delta_shift_samples]);
         xline(shift);
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -241,9 +236,9 @@ for n = 1:runs
     end
 end
 if (NNErrorFlag)
-    NN_RMSE = norm(NNError)/sqrt(runs)/fs*3e8
+    NN_RMSE = norm(NNError)/sqrt(runs)/fs*c
 end
-DLL_RMSE = norm(DLLError)/sqrt(runs)/fs*3e8
+DLL_RMSE = norm(DLLError)/sqrt(runs)/fs*c
 
 Data = [real(SamplesData),ShiftsData];
 csvwrite('Data.csv',Data);
@@ -252,7 +247,10 @@ csvwrite('Data.csv',Data);
 figure;
 title('Code Shift')
 hold on
-plot(ShiftsData)
+plot(ShiftsData(1:n))
 plot(cumsum(round(NNShift))+ShiftsData(1))
 plot(cumsum(round(shift_DLL_samples))+ShiftsData(1))
 legend('Actual Shift', 'Estimated Shift NN', 'Estimated Shift DLL')
+%%
+% This is to check if fD is compatible with the pseudorange
+% figure; plot(pseudoranges(sat,:)); hold on; plot(cumsum(-fDmat(sat,:)*1e-3/1575.42e6*c)+ pseudoranges(sat,1))
