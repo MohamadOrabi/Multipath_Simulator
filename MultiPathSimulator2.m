@@ -30,7 +30,7 @@ runs = 60000;    % # code_lengths to process
 n_multipath = 7; % Number of Multipath Components
 plotFlag = false;   %Set to plot.. plotting now is currently very slow
 NNErrorFlag = true; %Set to use NNDLL
-EstimateDoppler = true; %Set to use PLL to estimate doppler frequency
+EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
 
@@ -158,7 +158,7 @@ for n = 1:runs
     if (NNErrorFlag)
         %NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
         NNShift(n) = double(predict(net,real(SamplesData(n,:))));
-        code_shift_hat_NN = code_shift_hat_NN + round(NNShift(n)) + 0*1e-3*fDhat/1575.42e6;
+        code_shift_hat_NN = code_shift_hat_NN + round(NNShift(n));
         %code_shift_hat = code_shift_hat + round(NNShift(n));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
         NNError(n) = ShiftsData(n) - code_shift_hat_NN;
