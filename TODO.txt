@@ -1,3 +1,5 @@
 TO DO:
 
 1. Make multipath signals the same for intervals of time, I think that is more realistic than just random multipath signals jumping around all the time.
+
+2. Train the NN to output fractional delays of samples. Mish bas delays of an integer number of samples.

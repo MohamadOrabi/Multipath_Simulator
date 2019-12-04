@@ -26,8 +26,8 @@ fs = 2.5e6;             %In Hz
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 60000;    % # code_lengths to process
-n_multipath = 7; % Number of Multipath Components
+runs = 1000;    % # code_lengths to process
+n_multipath = 0; % Number of Multipath Components
 plotFlag = false;   %Set to plot.. plotting now is currently very slow
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
@@ -67,8 +67,8 @@ C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 
 %Initialize the Estimated variables
 shift_center = 0; %Estimated Shift
-code_shift_hat_DLL = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
-code_shift_hat_NN = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
+code_shift_hat_DLL(1) = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
+code_shift_hat_NN(1) = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
 
 if (plotFlag)
     figure;
@@ -124,15 +124,15 @@ for n = 1:runs
     R = Corr(y,code19.*exp(-1i*thetashat))./length(y);
     R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
     R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
-    SamplesData(n,:) = R(code_shift_hat_NN-delta_shift_samples+1:code_shift_hat_NN+delta_shift_samples);
+    SamplesData(n,:) = R(code_shift_hat_NN(n)-delta_shift_samples+1:code_shift_hat_NN(n)+delta_shift_samples);
     
     %% DLL
     B_DLL = 1;
     
     delta_shift_DLL = round(fs/chip_rate/2);
-    prompt_PRN = circshift(code19,round(code_shift_hat_DLL));
-    early_PRN = circshift(code19, round(code_shift_hat_DLL) - delta_shift_DLL);
-    late_PRN = circshift(code19, round(code_shift_hat_DLL) + delta_shift_DLL);
+    prompt_PRN = circshift(code19,round(code_shift_hat_DLL(n)));
+    early_PRN = circshift(code19, round(code_shift_hat_DLL(n)) - delta_shift_DLL);
+    late_PRN = circshift(code19, round(code_shift_hat_DLL(n)) + delta_shift_DLL);
     
     c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
     c_early = sum(early_PRN.*y.*exp(1i*thetashat))./length(code19_d);
@@ -141,9 +141,9 @@ for n = 1:runs
     L_t = (real(c_prompt)*(real(c_early) - real(c_late)) + imag(c_prompt)*(imag(c_early) - imag(c_late)));
     e_t = B_DLL*C*L_t;
     shift_DLL_samples(n) = round(-e_t*fs);
-    code_shift_hat_DLL = code_shift_hat_DLL + 1*shift_DLL_samples(n);
+    code_shift_hat_DLL(n+1) = code_shift_hat_DLL(n) + shift_DLL_samples(n);
     
-    DLLError(n) = ShiftsData(n) - code_shift_hat_DLL;
+    DLLError(n) = ShiftsData(n) - round(code_shift_hat_DLL(n));
     %% PLL
     if EstimateDoppler
         u(n) = -atan(imag(c_prompt)./real(c_prompt));
@@ -158,10 +158,10 @@ for n = 1:runs
     if (NNErrorFlag)
         %NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
         NNShift(n) = double(predict(net,real(SamplesData(n,:))));
-        code_shift_hat_NN = code_shift_hat_NN + round(NNShift(n));
+        code_shift_hat_NN(n+1) = code_shift_hat_NN(n) + round(NNShift(n));
         %code_shift_hat = code_shift_hat + round(NNShift(n));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
-        NNError(n) = ShiftsData(n) - code_shift_hat_NN;
+        NNError(n) = ShiftsData(n) - code_shift_hat_NN(n);
         %prompt_PRN = circshift(code19,shift_center + round(NNError(n)));
         %_promptNN = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
         %I_DataNN(n) = c_promptNN;
@@ -177,7 +177,7 @@ for n = 1:runs
         xline(shift);
         if (NNErrorFlag)
            %xline(shift_center + NNShift(n),'g');
-           xline(code_shift_hat_DLL,'r');
+           xline(code_shift_hat_DLL(n),'r');
         end
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -189,7 +189,7 @@ for n = 1:runs
         %Plot Multipath
         subplot(3,1,2)
         plot(t_plot,real(R_M))
-        xlim([code_shift_hat_DLL-delta_shift_samples,code_shift_hat_DLL+delta_shift_samples]);
+        xlim([code_shift_hat_DLL(n)-delta_shift_samples,code_shift_hat_DLL(n)+delta_shift_samples]);
         xline(shift);
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -204,7 +204,7 @@ for n = 1:runs
         subplot(3,1,3)
         hold off
         plot(t_plot,real(R),'b')
-        xlim([code_shift_hat_DLL-delta_shift_samples,code_shift_hat_DLL+delta_shift_samples]);
+        xlim([code_shift_hat_DLL(n)-delta_shift_samples,code_shift_hat_DLL(n)+delta_shift_samples]);
         xline(shift);
         if (NNErrorFlag)
            xline(shift_center + NNShift(n),'g');
@@ -218,12 +218,12 @@ for n = 1:runs
 %             real(R(shift_center + shift_DLL_samples(n) + delta_shift_DLL + 1)),'r*')
 %         plot(shift_center + shift_DLL_samples(n),...
 %             real(R(shift_center + shift_DLL_samples(n)+1)),'r*')
-        plot(code_shift_hat_DLL - delta_shift_DLL,...
-            real(R(code_shift_hat_DLL - delta_shift_DLL + 1)),'r*')
-        plot(code_shift_hat_DLL + delta_shift_DLL,...
-            real(R(code_shift_hat_DLL + delta_shift_DLL + 1)),'r*')
-        plot(code_shift_hat_DLL,...
-            real(R(code_shift_hat_DLL + 1)),'g*')
+        plot(code_shift_hat_DLL(n) - delta_shift_DLL,...
+            real(R(code_shift_hat_DLL(n) - delta_shift_DLL + 1)),'r*')
+        plot(code_shift_hat_DLL(n) + delta_shift_DLL,...
+            real(R(code_shift_hat_DLL(n) + delta_shift_DLL + 1)),'r*')
+        plot(code_shift_hat_DLL(n),...
+            real(R(code_shift_hat_DLL(n) + 1)),'g*')
 
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -248,8 +248,10 @@ figure;
 title('Code Shift')
 hold on
 plot(ShiftsData(1:n))
-plot(cumsum(round(NNShift))+ShiftsData(1))
-plot(cumsum(round(shift_DLL_samples))+ShiftsData(1))
+%plot(cumsum(round(NNShift))+ShiftsData(1))
+plot(code_shift_hat_NN(2:n+1))
+%plot(cumsum(round(shift_DLL_samples))+ShiftsData(1))
+plot(code_shift_hat_DLL(2:n+1))
 legend('Actual Shift', 'Estimated Shift NN', 'Estimated Shift DLL')
 %%
 % This is to check if fD is compatible with the pseudorange
