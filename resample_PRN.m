@@ -5,9 +5,9 @@ function r_PRN = resample_PRN(PRN,samples_code,chip_rate,fs,starting_index)
 %this leads to drifting of the code (or skipping a sample).
 
 if(nargin == 4); starting_index = 1; end
-
+%%
 for i = 1:samples_code
    r_PRN(i) = PRN(mod(floor((i+starting_index-1)*chip_rate/fs),1023)+1);
 end
-
+%%
 end

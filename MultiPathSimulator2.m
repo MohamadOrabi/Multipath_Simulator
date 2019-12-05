@@ -17,11 +17,13 @@ fDs = fDmat(1,:);
 %Constants
 chip_rate = 1.023e6;   %In Hz
 fs = 2.5e6;             %In Hz
+fs_hi = 500e6;
+f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
 runs = 500;    % # runs
-n_multipath = 7; %Number of Multipath Components
+n_multipath = 0; %Number of Multipath Components
 plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
@@ -29,8 +31,12 @@ delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
 
 samplesPerCode = floor(fs/chip_rate*1023);
+samplesPerCode_hi = floor(fs_hi/chip_rate*1023);
+
 t = (0:samplesPerCode-1)/fs;
 t_plot = t*fs;
+
+t_hi = (0:samplesPerCode_hi-1)/fs_hi;
 %t_p = (1:2*delta_shift)/fs - delta_shift/fs;
 
 
@@ -38,7 +44,9 @@ t_plot = t*fs;
 [CAcode19, code19] = generate_PRN(3,6);     %for PRN 19
 
 %Resampling the PRNs
+code19_hi = resample_PRN(code19,samplesPerCode_hi,chip_rate,fs_hi,0);
 code19 = resample_PRN(code19,samplesPerCode,chip_rate,fs,0);
+
 
 
 %Initializing training data matrices
@@ -56,9 +64,9 @@ if EstimateDoppler
 end
 
 
-sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
+sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode_hi;
 Tc = 1/chip_rate;
-C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
+C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode_hi)^2);
 %%
 shift_center = 500;
 if (plotFlag)
@@ -72,44 +80,50 @@ for n = 1:runs
     
     fD = fDs(n);
   
-    noise1 = sigma_noise*randn(1,samplesPerCode);
-    noise2 = sigma_noise*randn(1,samplesPerCode);
+    noise1 = sigma_noise*randn(1,samplesPerCode_hi);
+    noise2 = sigma_noise*randn(1,samplesPerCode_hi);
     noise = noise1 + 1i*noise2;
     
-    shift = shift_Tc/chip_rate*fs*(2*(rand-0.5));
-    ShiftsData(n) = round(shift);
+    shift = shift_Tc/chip_rate*fs_hi*(2*(rand-0.5));
+    ShiftsData(n) = round(shift)/f_ratio;
     
     %Shifting PRNs
-    code19_d = circshift(code19,round(shift)+shift_center);
+    code19_d = circshift(code19_hi,round(shift)+shift_center);
     code19_Multipath = 0;
     
     for ii = 1:n_multipath
-        multipath_shift_samples = gamrnd(2.56,65.12)/3e8*fs;
+        multipath_shift_samples = gamrnd(2.56,65.12)/3e8*fs_hi;
         theta =pi/sqrt(3)*randn;
         a = -0.0032;b = -12.3;  %Linear Model for Attenuation
-        Att_db = a*(multipath_shift_samples)/fs*1e3 + b;
+        Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
         A_M = 1*10^(Att_db/20);
-        code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19,round(shift + multipath_shift_samples)+shift_center);
+        code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center);
     end
     
-    thetas = 2*pi*fD*t + phase;
-    phase = phase + 2*pi*fD*(t(end) + 1/fs);
+    thetas = 2*pi*fD*t_hi + phase;
+    phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
+    thetas_lo = decimate(thetas,f_ratio);
     
     if(EstimateDoppler)
         thetashat = 2*pi*fDhat*t + phasehat;
         phasehat = phasehat + 2*pi*fDhat*(t(end) + 1/fs);
     else
-        thetashat = thetas;
+        thetashat = thetas_lo;
     end
 
     y = code19_d + code19_Multipath + noise;% + code25_d + code5_d;
     A = 1;
     y = y.*A.^0.5.*exp(-1i*thetas);
+    
+    %Resampling to low fs
+    y_lo = decimate(y,f_ratio);
+    code19_d_lo = decimate(code19_d + noise,f_ratio);
+    code19_Multipath_lo = decimate(code19_Multipath + noise,f_ratio);
 
-    R = Corr(y,code19.*exp(-1i*thetashat))./length(y);
-    R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
-    R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
+    R = Corr(y_lo,code19.*exp(-1i*thetashat))./length(y_lo);
+    R_M = Corr((code19_Multipath_lo).*exp(-1i*thetas_lo),code19.*exp(-1i*thetashat))./length(y_lo);
+    R_Actual = Corr((code19_d_lo).*exp(-1i*thetas_lo),code19.*exp(-1i*thetashat))./length(y_lo);
     SamplesData(n,:) = R(shift_center-delta_shift_samples+1:shift_center+delta_shift_samples);
     %SamplesData(n,:) = R(shift_center-delta_shift_samples:shift_center+delta_shift_samples);
 
@@ -122,9 +136,9 @@ for n = 1:runs
     early_PRN = circshift(code19, shift_center - delta_shift_DLL);
     late_PRN = circshift(code19, shift_center + delta_shift_DLL);
     
-    c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    c_early = sum(early_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    c_late = sum(late_PRN.*y.*exp(1i*thetashat))./length(code19_d);
+    c_prompt = sum(prompt_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_late = sum(late_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
     
     L_t = (real(c_prompt)*(real(c_early) - real(c_late)) + imag(c_prompt)*(imag(c_early) - imag(c_late)));
     e_t = C*L_t;
