@@ -23,9 +23,9 @@ fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
 runs = 1;    % # runs
-n_multipath = 0; %Number of Multipath Components
-plotFlag = true;   %Set to plot
-NNErrorFlag = false; %Set to use NNDLL
+n_multipath = 7; %Number of Multipath Components
+plotFlag = false;   %Set to plot
+NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
@@ -50,7 +50,9 @@ code19 = resample_PRN(code19,samplesPerCode,chip_rate,fs,0);
 
 
 %Initializing training data matrices
-ShiftsData = zeros(runs,1); %Errros from the center of the MDLL
+ShiftsData = zeros(runs,1); %Errros from the center of the MDLL (in samples)
+ShiftsData1 = zeros(runs,1); %Errros from the center of the MDLL (in time)
+
 SamplesData = zeros(runs,2*delta_shift_samples);
 SamplesData_noiseless = zeros(runs,2*delta_shift_samples);  %This is used for the autoencoder
 Data = zeros(runs,size(ShiftsData,2) + size(SamplesData,2));
@@ -64,9 +66,9 @@ if EstimateDoppler
 end
 
 
-sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode_hi;
+sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
 Tc = 1/chip_rate;
-C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode_hi)^2);
+C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
 shift_center_lo = round(500*fs/chip_rate); %In Chips
 shift_center_hi = shift_center_lo*f_ratio; %In Chips
@@ -82,13 +84,17 @@ for n = 1:runs
     
     fD = fDs(n);
   
-    noise1 = sigma_noise*randn(1,samplesPerCode_hi);
-    noise2 = sigma_noise*randn(1,samplesPerCode_hi);
-    noise = 0*noise1 + 0*1i*noise2;
+    noise1 = sigma_noise*randn(1,samplesPerCode);
+    noise2 = sigma_noise*randn(1,samplesPerCode);
+    noise = 1*noise1 + 1*1i*noise2;
     
-    shift = shift_Tc/chip_rate*fs_hi*(1*(rand-0.5));
-    shift = 0.1*fs_hi/chip_rate;
-    ShiftsData(n) = shift/fs_hi
+    shift = shift_Tc/chip_rate*fs_hi*(2*(rand-0.5));
+    %shift = 0*fs_hi/chip_rate;
+    ShiftsData1(n) = shift;
+    ShiftsData(n) = shift/f_ratio;
+    ShiftsData1(n) = shift/f_ratio;
+
+    
     
     %Shifting PRNs
     code19_d = circshift(code19_hi,round(shift)+shift_center_hi);
@@ -106,28 +112,40 @@ for n = 1:runs
     
     thetas = 2*pi*fD*t_hi + phase;
     phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
-    thetas_lo = decimate(thetas,f_ratio);
+    %thetas_lo = decimate(thetas,f_ratio);
+    thetas_lo = 2*pi*fD*t + phase;
+    phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
     
     if(EstimateDoppler)
         thetashat = 2*pi*fDhat*t + phasehat;
         phasehat = phasehat + 2*pi*fDhat*(t(end) + 1/fs);
     else
+        thetas = 0;
+        thetas_lo = 0;
         thetashat = thetas_lo;
     end
 
-    y = code19_d + code19_Multipath + noise;% + code25_d + code5_d;
+    y = code19_d + code19_Multipath;% + code25_d + code5_d;
     A = 1;
-    y = y.*A.^0.5.*exp(-1i*thetas);
+    %y = y.*A.^0.5.*exp(-1i*thetas);
     
     %Resampling to low fs
-    y_lo = decimate(y,f_ratio);
-    code19_d_lo = decimate(code19_d + noise,f_ratio);
+    y_lo = decimate(y,f_ratio) + noise;
+    y_lo_noiseless = y_lo-noise;
+
+    y_lo = y_lo.*A.^0.5.*exp(-1i*thetas_lo);
+    y_lo_noiseless = y_lo_noiseless.*A.^0.5.*exp(-1i*thetas_lo);
+
+    code19_d_lo = round(decimate(code19_d + noise,f_ratio));
     code19_Multipath_lo = decimate(code19_Multipath + noise,f_ratio);
 
-    R = Corr(y_lo,code19.*exp(-1i*thetashat))./length(y_lo);
-    R_M = Corr((code19_Multipath_lo).*exp(-1i*thetas_lo),code19.*exp(-1i*thetashat))./length(y_lo);
-    R_Actual = Corr((code19_d_lo).*exp(-1i*thetas_lo),code19.*exp(-1i*thetashat))./length(y_lo);
+    R = Corr(y_lo.*exp(1i*thetashat),code19)./length(y_lo);
+    R_noiseless = Corr(y_lo_noiseless.*exp(1i*thetashat),code19)./length(y_lo);
+    R_M = Corr((code19_Multipath_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
+    R_Actual = Corr((code19_d_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
     SamplesData(n,:) = R(shift_center_lo-delta_shift_samples+1:shift_center_lo+delta_shift_samples);
+    SamplesData_noiseless(n,:) = R_noiseless(shift_center_lo-delta_shift_samples+1:shift_center_lo+delta_shift_samples);
+
     %SamplesData(n,:) = R(shift_center-delta_shift_samples:shift_center+delta_shift_samples);
 
     
@@ -195,7 +213,7 @@ for n = 1:runs
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
         title('Line of Sight Signal')
-        legend('Correlation','Prompt Shift','Estimated Prompt (NN)','Estimated Prompt (DLL)')
+        legend('Correlation','Prompt Shift','Estimated Prompt (NN)','Estimated Prompt (DLL)', 'Keras')
 
         %ylim([0,0.3])
 
@@ -247,8 +265,11 @@ if (NNErrorFlag)
 end
 DLL_RMSE = norm(DLLError)/sqrt(runs)/fs*3e8
 
-Data = [real(SamplesData),ShiftsData];
+Data = [real(SamplesData),ShiftsData1];
+X_noiseless = real(SamplesData_noiseless);
 csvwrite('Data.csv',Data);
+csvwrite('X_noiseless',X_noiseless);
+
 
 %%
 % clear X Y
