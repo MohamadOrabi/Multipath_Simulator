@@ -1,3 +1,6 @@
 Add to paper:
 
 A receiver can only respond to changes in the code phase that are equivalent to a sampling time Ts. However, the discriminator outputs the estimated code phase error in the real time domain, which is needed for accurately estimating the pseudorange. To correctly estimate fractional code shift, the simulator generates signals at a very high frequency of 500MHz, and then adds the multipath signals and noise at that frequency. It then decimates the generated signals, to simulate the signal at the receiver after sampling. This allows us to train the neural network to give the code phase error in the real domain, and doesn't limit it to errors that are integer multiples of the sampling time.
+
+TODO: 
+Fix statistical model, add noise to attenuation model. 
