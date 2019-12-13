@@ -23,11 +23,13 @@ fDs = interpolatevec(fDmat(sat,:));
 c = 299792458;
 chip_rate = 1.023e6;   %In Hz
 fs = 2.5e6;             %In Hz
+fs_hi = 500e6;
+f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 1000;    % # code_lengths to process
-n_multipath = 0; % Number of Multipath Components
+runs = 500;    % # code_lengths to process
+n_multipath = 7; % Number of Multipath Components
 plotFlag = false;   %Set to plot.. plotting now is currently very slow
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
@@ -35,8 +37,12 @@ delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
 
 samplesPerCode = floor(fs/chip_rate*1023);
+samplesPerCode_hi = floor(fs_hi/chip_rate*1023);
+
 t = (0:samplesPerCode-1)/fs;
 t_plot = t*fs;
+
+t_hi = (0:samplesPerCode_hi-1)/fs_hi;
 %t_p = (1:2*delta_shift)/fs - delta_shift/fs;
 
 
@@ -44,6 +50,7 @@ t_plot = t*fs;
 [CAcode19, code19] = generate_PRN(3,6);     %for PRN 19
 
 %Resampling the PRNs
+code19_hi = resample_PRN(code19,samplesPerCode_hi,chip_rate,fs_hi,0);
 code19 = resample_PRN(code19,samplesPerCode,chip_rate,fs,0);
 
 
@@ -66,9 +73,10 @@ Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 
 %Initialize the Estimated variables
-shift_center = 0; %Estimated Shift
-code_shift_hat_DLL(1) = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
-code_shift_hat_NN(1) = round(shift_center + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
+shift_center_hi = 0; %Estimated Shift
+shift_center_lo = shift_center_hi/f_ratio;
+code_shift_hat_DLL(1) = round(shift_center_hi + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
+code_shift_hat_NN(1) = round(shift_center_hi + mod(pseudorange(sat,1),300e3)/c*fs); % Initial Value 
 
 if (plotFlag)
     figure;
@@ -80,7 +88,7 @@ for n = 1:runs
     n/runs*100
     
     %Calculate code_shift from pseudorange(n)
-    code_shift(n) = mod(pseudorange(sat,n),300e3)/c*fs;   %This might cause a problem
+    code_shift(n) = mod(pseudorange(sat,n),300e3)/c*fs_hi;   %This might cause a problem
     
     fD = fDs(n);
     
@@ -89,61 +97,84 @@ for n = 1:runs
     noise = noise1 + 1i*noise2;
     
     %shift = shift_Tc/chip_rate*fs*(rand-0.5);
-    shift = mod(code_shift(n)-1,samplesPerCode) + 1;
-    ShiftsData(n) = round(shift);
+    shift = mod(code_shift(n)-1,samplesPerCode_hi)+1;
+    %shift = 1868*f_ratio;
+    ShiftsData(n) = shift/f_ratio;
     
     %Shifting PRNs
-    code19_d = circshift(code19,round(shift)+shift_center);
+    code19_d = circshift(code19_hi,round(shift)+shift_center_lo);
     code19_Multipath = 0;
     
     %Generate Multipath Signals
     for ii = 1:n_multipath
-        multipath_shift_samples = gamrnd(2.56,65.12)/c*fs;
+        multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi;
         theta =pi/sqrt(3)*randn;
         a = -0.0032;b = -12.3;  %Linear Model for Attenuation
-        Att_db = a*(multipath_shift_samples)/fs*1e3 + b;
+        Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
         A_M = 1*10^(Att_db/20);
-        code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19,round(shift + multipath_shift_samples)+shift_center);
+        code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
     end
     
-    thetas = 2*pi*fD*t + phase;
-    phase = phase + 2*pi*fD*(t(end) + 1/fs);
+    thetas = 2*pi*fD*t_hi + phase;
+    phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
+    %thetas_lo = decimate(thetas,f_ratio);
+    thetas_lo = 2*pi*fD*t + phase;
+    phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
     
     if(EstimateDoppler)
         thetashat = 2*pi*fDhat*t + phasehat;
         phasehat = phasehat + 2*pi*fDhat*(t(end) + 1/fs);
     else
-        thetashat = thetas;
+        thetas = 0;
+        thetas_lo = 0;
+        thetashat = thetas_lo;
     end
 
-    y = code19_d + code19_Multipath + noise;% + code25_d + code5_d;
+    y = code19_d + code19_Multipath;% + noise;% + code25_d + code5_d;
     A = 1;
-    y = y.*A.^0.5.*exp(-1i*thetas);
-
-    R = Corr(y,code19.*exp(-1i*thetashat))./length(y);
-    R_M = Corr((code19_Multipath + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
-    R_Actual = Corr((code19_d + noise).*exp(-1i*thetas),code19.*exp(-1i*thetashat))./length(y);
-    SamplesData(n,:) = R(code_shift_hat_NN(n)-delta_shift_samples+1:code_shift_hat_NN(n)+delta_shift_samples);
+    %y = y.*A.^0.5.*exp(-1i*thetas);
     
+    %Resampling to low fs
+    y_lo_noiseless = decimate(y,f_ratio);
+    y_lo = y_lo_noiseless + noise;
+
+    y_lo = y_lo.*A.^0.5.*exp(-1i*thetas_lo);
+    y_lo_noiseless = y_lo_noiseless.*A.^0.5.*exp(-1i*thetas_lo);
+
+    code19_d_lo = round(decimate(code19_d,f_ratio));
+
+    R = Corr(y_lo.*exp(1i*thetashat),code19)./length(y_lo);
+    R_noiseless = Corr(y_lo_noiseless.*exp(1i*thetashat),code19)./length(y_lo);
+    R_Actual = Corr((code19_d_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
+    SamplesData(n,:) = R(round(code_shift_hat_NN(n))-delta_shift_samples+1:round(code_shift_hat_NN(n))+delta_shift_samples);
+    SamplesData_noiseless(n,:) = R_noiseless(round(code_shift_hat_NN(n))-delta_shift_samples+1:round(code_shift_hat_NN(n))+delta_shift_samples);
+    %SamplesData(n,:) = R(shift_center-delta_shift_samples:shift_center+delta_shift_samples);
+
+    if (n_multipath > 0)
+        code19_Multipath_lo = decimate(code19_Multipath,f_ratio);
+        R_M = Corr((code19_Multipath_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
+    else
+        R_M = zeros(size(R,1),size(R,2));
+    end
     %% DLL
     B_DLL = 1;
     
     delta_shift_DLL = round(fs/chip_rate/2);
-    prompt_PRN = circshift(code19,round(code_shift_hat_DLL(n)));
-    early_PRN = circshift(code19, round(code_shift_hat_DLL(n)) - delta_shift_DLL);
-    late_PRN = circshift(code19, round(code_shift_hat_DLL(n)) + delta_shift_DLL);
+    prompt_PRN = circshift(code19,round(code_shift_hat_DLL(n)) - 1);
+    early_PRN = circshift(code19, round(code_shift_hat_DLL(n)) - delta_shift_DLL - 1);
+    late_PRN = circshift(code19, round(code_shift_hat_DLL(n)) + delta_shift_DLL - 1);
     
-    c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    c_early = sum(early_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    c_late = sum(late_PRN.*y.*exp(1i*thetashat))./length(code19_d);
+    c_prompt = sum(prompt_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_late = sum(late_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
     
     L_t = (real(c_prompt)*(real(c_early) - real(c_late)) + imag(c_prompt)*(imag(c_early) - imag(c_late)));
     e_t = B_DLL*C*L_t;
-    shift_DLL_samples(n) = round(-e_t*fs);
-    code_shift_hat_DLL(n+1) = code_shift_hat_DLL(n) + shift_DLL_samples(n);
+    shift_DLL_samples(n) = -e_t*fs;
+    code_shift_hat_DLL(n+1) = round(code_shift_hat_DLL(n)) + shift_DLL_samples(n);
     
-    DLLError(n) = ShiftsData(n) - round(code_shift_hat_DLL(n));
+    DLLError(n) = ShiftsData(n) - code_shift_hat_DLL(n);
     %% PLL
     if EstimateDoppler
         u(n) = -atan(imag(c_prompt)./real(c_prompt));
@@ -158,7 +189,7 @@ for n = 1:runs
     if (NNErrorFlag)
         %NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
         NNShift(n) = double(predict(net,real(SamplesData(n,:))));
-        code_shift_hat_NN(n+1) = code_shift_hat_NN(n) + round(NNShift(n));
+        code_shift_hat_NN(n+1) = round(code_shift_hat_NN(n)) + NNShift(n);
         %code_shift_hat = code_shift_hat + round(NNShift(n));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
         NNError(n) = ShiftsData(n) - code_shift_hat_NN(n);
@@ -173,11 +204,11 @@ for n = 1:runs
         %Plot Actual
         subplot(3,1,1)
         plot(t_plot,real(R_Actual))
-        %xlim([shift_center-delta_shift_samples,shift_center+delta_shift_samples]);
-        xline(shift);
+        xlim([round(ShiftsData(n))-delta_shift_samples,round(ShiftsData(n))+delta_shift_samples]-1);
+        xline(ShiftsData(n)-1);
         if (NNErrorFlag)
-           %xline(shift_center + NNShift(n),'g');
-           xline(code_shift_hat_DLL(n),'r');
+           xline(code_shift_hat_NN(n)-1,'g');
+           xline(code_shift_hat_DLL(n)-1,'r');
         end
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -189,7 +220,7 @@ for n = 1:runs
         %Plot Multipath
         subplot(3,1,2)
         plot(t_plot,real(R_M))
-        xlim([code_shift_hat_DLL(n)-delta_shift_samples,code_shift_hat_DLL(n)+delta_shift_samples]);
+        xlim([code_shift_hat_DLL(n)-delta_shift_samples,code_shift_hat_DLL(n)+delta_shift_samples]-1);
         xline(shift);
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
@@ -204,11 +235,11 @@ for n = 1:runs
         subplot(3,1,3)
         hold off
         plot(t_plot,real(R),'b')
-        xlim([code_shift_hat_DLL(n)-delta_shift_samples,code_shift_hat_DLL(n)+delta_shift_samples]);
+        xlim([round(code_shift_hat_DLL(n))-delta_shift_samples,round(code_shift_hat_DLL(n))+delta_shift_samples] - 1);
         xline(shift);
         if (NNErrorFlag)
-           xline(shift_center + NNShift(n),'g');
-           xline(shift_center + shift_DLL_samples(n),'r');
+           xline(shift_center_lo + NNShift(n),'g');
+           xline(shift_center_lo + shift_DLL_samples(n),'r');
         end
         hold on
 
@@ -218,12 +249,12 @@ for n = 1:runs
 %             real(R(shift_center + shift_DLL_samples(n) + delta_shift_DLL + 1)),'r*')
 %         plot(shift_center + shift_DLL_samples(n),...
 %             real(R(shift_center + shift_DLL_samples(n)+1)),'r*')
-        plot(code_shift_hat_DLL(n) - delta_shift_DLL,...
-            real(R(code_shift_hat_DLL(n) - delta_shift_DLL + 1)),'r*')
-        plot(code_shift_hat_DLL(n) + delta_shift_DLL,...
-            real(R(code_shift_hat_DLL(n) + delta_shift_DLL + 1)),'r*')
-        plot(code_shift_hat_DLL(n),...
-            real(R(code_shift_hat_DLL(n) + 1)),'g*')
+        plot(round(code_shift_hat_DLL(n)) - delta_shift_DLL - 1,...
+            real(R(round(code_shift_hat_DLL(n)) - delta_shift_DLL)),'r*')
+        plot(round(code_shift_hat_DLL(n)) + delta_shift_DLL - 1,...
+            real(R(round(code_shift_hat_DLL(n)) + delta_shift_DLL)),'r*')
+        plot(round(code_shift_hat_DLL(n)) - 1,...
+            real(R(round(code_shift_hat_DLL(n)))),'g*')
 
         xlabel('Shifts in Code')
         ylabel('Correlation Power')
