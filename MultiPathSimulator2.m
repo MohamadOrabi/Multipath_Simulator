@@ -23,7 +23,7 @@ fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
 runs = 500;    % # runs
-n_multipath = 7; %Number of Multipath Components
+n_multipath = 0; %Number of Multipath Components
 plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
@@ -94,8 +94,6 @@ for n = 1:runs
     ShiftsData(n) = shift/f_ratio;
     ShiftsData1(n) = shift/f_ratio;
 
-    
-    
     %Shifting PRNs
     code19_d = circshift(code19_hi,round(shift)+shift_center_hi);
     code19_Multipath = 0;
