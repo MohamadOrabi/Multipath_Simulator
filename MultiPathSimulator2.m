@@ -101,7 +101,10 @@ for n = 1:runs
     for ii = 1:n_multipath
         multipath_shift_samples = gamrnd(2.56,65.12)/3e8*fs_hi;
         theta =pi/sqrt(3)*randn;
-        a = -0.0032;b = -12.3;  %Linear Model for Attenuation
+        %a = -0.0032;b = -12.3;  
+        %Linear Model for Attenuation
+        a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
+        b = -12.7 + (12.7-11.9)*rand();
         Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
         A_M = 1*10^(Att_db/20);
