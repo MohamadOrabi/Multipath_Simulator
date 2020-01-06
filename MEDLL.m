@@ -4,17 +4,20 @@ clear all
 
 %% Initialization
 
-net = importKerasNetwork('modelRegression.h5') %Imports the Keras network
+net = importKerasNetwork('modelRegression_10mhz.h5') %Imports the Keras network
 %load('means.mat')  %Used for scaling inputs to NN
 %load('stds.mat')
 load('fDmat.mat')   % In Hz
 %load('sat_poss.mat')
 load('pseudoranges.mat')    % In meters
+load('Elevations.mat')
+
 sat = 9;    %Do not change now!
 
 % Interpolating fD and pseudorange
 pseudorange(sat,:) = interpolatevec(pseudoranges(sat,:));
 fDs = interpolatevec(fDmat(sat,:));
+El = interpolatevec(Elevations(sat,:))*180/pi;
 
 %fDs = fDmat(6,:);
 %fDs = fDmat(sat,:);
@@ -22,14 +25,14 @@ fDs = interpolatevec(fDmat(sat,:));
 %Constants
 c = 299792458;
 chip_rate = 1.023e6;   %In Hz
-fs = 2.5e6;             %In Hz
+fs = 10e6;             %In Hz
 fs_hi = 500e6;
 f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 1000;    % # code_lengths to process
-n_multipath = 7; % Number of Multipath Components
+runs = 500;    % # code_lengths to process
+n_multipath = 2; % Number of Multipath Components
 plotFlag = false;   %Set to plot.. plotting now is currently very slow
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
@@ -125,9 +128,10 @@ for n = 1:runs
     code19_Multipath = zeros(1,round(fs_hi/chip_rate*1023));
     
     %Generate Multipath Signals
+    [gamma,varsigma] = getGammaParams(El(n));
     for ii = 1:n_multipath
-        multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi;
-        theta =pi/sqrt(3)*randn; theta = 0;
+        multipath_shift_samples = gamrnd(gamma,varsigma)/c*fs_hi; %2.56,65.12
+        theta =pi/sqrt(3)*randn; %theta = 0;
         %Linear Model for Attenuation
         %a = -0.0032;b = -12.3;  
         a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
@@ -191,7 +195,7 @@ for n = 1:runs
     Residual = R;
     
     %Estimating and Removing Multipath Components
-    for iterations = 1:2
+    for iterations = 1:1
         
         tau_hat1 = find(abs(real(Residual)) == abs(max(real(Residual))));
         a_hat1 = real(Residual(tau_hat1));
@@ -368,13 +372,14 @@ hold on
 %plot(cumsum(round(NNShift))+ShiftsData(1))
 %plot(cumsum(round(shift_DLL_samples))+ShiftsData(1))
 plot(code_shift_hat_DLL(2:n+1));
+plot(code_shift_hat_MEDLL(2:n+1));
 plot(code_shift_hat_NN(2:n+1));
 plot(ShiftsData(1:n));
 
 xline(round(runs/3));
 xline(round(runs*2/3));
 
-legend('Estimated Shift DLL', 'Estimated Shift NN', 'True Shift')
+legend('Estimated Shift DLL', 'Estimated Shift DLL', 'Estimated Shift NN', 'True Shift')
 %%
 % This is to check if fD is compatible with the pseudorange
 % figure; plot(pseudoranges(sat,:)); hold on; plot(cumsum(-fDmat(sat,:)*1e-3/1575.42e6*c)+ pseudoranges(sat,1))

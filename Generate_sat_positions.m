@@ -23,7 +23,7 @@ minute = 22;
 sec = 06;%25;
 
 rxPos_lla = [33.952790; -117.319165; 415];
-Fc = 137.5e6;   % Hz
+Fc = 1575.42e6;   % Hz
 % bad_IDs = [23545, 23546, 25158, 25413, 25476, 25478, 25479, 25480,...
 %     25482, 25983, 25986, 33060, 33061, 33062, 33063, 33064, 33065,...
 %     40089, 41181, 41180, 40088, 40090, 21576];
@@ -56,6 +56,7 @@ for ll = 1:length(El_mask_vec)
         vs = satrec(ii).v_s_ecef;
         satnum = satrec(ii).satnum;
         [~, El] = GetAzEl(rs(1,:),rs(2,:),rs(3,:),rxPos);
+        Elevations(ii,1:length(El)) = El;
         ind_av = (El>El_mask_rad);
         num_avail_sats(ll, :) = num_avail_sats(ll, :) + ind_av;
         if plotDoppler

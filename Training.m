@@ -1,31 +1,33 @@
 clc
-close all
+%close all
 clear all
 
 %% Initialization
 
-net = importKerasNetwork('modelRegression.h5')
+net = importKerasNetwork('modelRegression_10mhz.h5')
 %net = importKerasLayers('modelRegression.h5','ImportWeights',true);
 
 %load('means.mat')
 %load('stds.mat')
 load('fDmat.mat')
+load('Elevations.mat')
 
 %fDs = fDmat(6,:);
 fDs = fDmat(1,:);
 
 %Constants
+c = 299792458;
 chip_rate = 1.023e6;   %In Hz
-fs = 5e6;             %In Hz
+fs = 10e6;             %In Hz
 fs_hi = 500e6;
 f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
-CNR_dB = 35;        % in dB-Hz
-runs = 5000;    % # runs
-n_multipath = 0; %Number of Multipath Components
+CNR_dB = 60;        % in dB-Hz
+runs = 1000;    % # runs
+n_multipath = 1; %Number of Multipath Components
 plotFlag = false;   %Set to plot
-NNErrorFlag = false; %Set to use NNDLL
+NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
@@ -70,7 +72,7 @@ sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
-shift_center_lo = round(500*fs/chip_rate); %In Chips
+shift_center_lo = 500;%round(500*fs/chip_rate); %In Chips
 shift_center_hi = shift_center_lo*f_ratio; %In Chips
 
 if (plotFlag)
@@ -82,13 +84,14 @@ for n = 1:runs
     clc;
     n/runs*100
     
-    fD = fDs(n);
+    fD = 0;%fDs(n);
   
     noise1 = sigma_noise*randn(1,samplesPerCode);
     noise2 = sigma_noise*randn(1,samplesPerCode);
     noise = 1*noise1 + 1*1i*noise2;
     
-    shift = shift_Tc/chip_rate*fs_hi*(1*(rand-0.5));
+    %shift = shift_Tc/chip_rate*fs_hi*(2*(rand-0.5));
+    shift = 0;
     %shift = 0*fs_hi/chip_rate;
     ShiftsData1(n) = shift;
     ShiftsData(n) = shift/f_ratio;
@@ -99,15 +102,20 @@ for n = 1:runs
     code19_Multipath = 0;
     
     for ii = 1:n_multipath
-        multipath_shift_samples = gamrnd(2.56,65.12)/3e8*fs_hi;
-        theta =pi/sqrt(3)*randn;
+        %multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi; %2.56,65.12
+        multipath_shift_samples = 2*round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
+        multipathshifts(n) = 2*round((n-1)/runs*fs_hi/chip_rate);
+        %theta =pi/sqrt(3)*randn;
+        theta = pi*rand;
         %a = -0.0032;b = -12.3;  
         %Linear Model for Attenuation
         a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
         b = -12.7 + (12.7-11.9)*rand();
         Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
-        A_M = 1*10^(Att_db/20);
+        %A_M = 1*10^(Att_db/20);
+        A_M = 10^-1.2;
+        %A_M = 0;
         code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
     end
     
@@ -143,6 +151,8 @@ for n = 1:runs
     R_noiseless = Corr(y_lo_noiseless.*exp(1i*thetashat),code19)./length(y_lo);
     R_Actual = Corr((code19_d_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
     SamplesData(n,:) = R(shift_center_lo-delta_shift_samples+1:shift_center_lo+delta_shift_samples);
+    %SamplesData1(n,:) = decimate(SamplesData(n,:),10);
+    %SamplesData(n,:) = SamplesData(n,:)/max(SamplesData(n,:));
     SamplesData_noiseless(n,:) = R_noiseless(shift_center_lo-delta_shift_samples+1:shift_center_lo+delta_shift_samples);
     %SamplesData(n,:) = R(shift_center-delta_shift_samples:shift_center+delta_shift_samples);
 
@@ -156,10 +166,12 @@ for n = 1:runs
     %% DLL
     B_DLL = 1;
     
-    delta_shift_DLL = round(fs/chip_rate/2);
-    prompt_PRN = circshift(code19,shift_center_lo-1);
-    early_PRN = circshift(code19, shift_center_lo - delta_shift_DLL-1);
-    late_PRN = circshift(code19, shift_center_lo + delta_shift_DLL-1);
+    %delta_shift_DLL = round(fs/chip_rate/2);
+    %delta_shift_DLL = round(fs/chip_rate/2/10);
+    delta_shift_DLL = 1;
+    prompt_PRN = circshift(code19,shift_center_lo - 1 );
+    early_PRN = circshift(code19, shift_center_lo - delta_shift_DLL -1);
+    late_PRN = circshift(code19, shift_center_lo + delta_shift_DLL -1);
     
     c_prompt = sum(prompt_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
     c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
@@ -190,10 +202,10 @@ for n = 1:runs
 
     %% Prediction
     if (NNErrorFlag)
-        NNShift(n) = (PredictShift_2p5(real(SamplesData(n,:))));
+        %NNShift_Keras(n) = (PredictShift_2p5(real(SamplesData(n,:))));
         %SamplesData_scaled = (SamplesData(n,:) - means)./stds;
         NNShift_Keras(n) = double(predict(net,real(SamplesData(n,:))));
-        NNError(n) = ShiftsData(n) - NNShift(n);
+        %NNError(n) = ShiftsData(n) - NNShift_Keras(n);
         NNError_Keras(n) = ShiftsData(n) - NNShift_Keras(n);
         %prompt_PRN = circshift(code19,shift_center + round(NNError(n)));
         %_promptNN = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
@@ -211,7 +223,7 @@ for n = 1:runs
         xline(shift_center_lo + shift_DLL_samples(n)-1,'r');           
 
         if (NNErrorFlag)
-           xline(shift_center_lo + NNShift(n)-1,'g');
+           xline(shift_center_lo + NNShift_Keras(n)-1,'g');
            xline(shift_center_lo + NNShift_Keras(n)-1,'b');
 
         end
@@ -243,7 +255,7 @@ for n = 1:runs
         xlim([shift_center_lo-delta_shift_samples,shift_center_lo+delta_shift_samples]-1);
         xline(shift_center_lo + ShiftsData(n)-1);
         if (NNErrorFlag)
-           xline(shift_center_lo + NNShift(n),'g');
+           xline(shift_center_lo + NNShift_Keras(n),'g');
            xline(shift_center_lo + shift_DLL_samples(n),'r');
         end
         hold on
@@ -266,7 +278,7 @@ for n = 1:runs
 end
 if (NNErrorFlag)
     NN_Keras_RMSE = norm(NNError_Keras)/sqrt(runs)/fs*3e8
-    NN_RMSE = norm(NNError)/sqrt(runs)/fs*3e8
+    %NN_RMSE = norm(NNError)/sqrt(runs)/fs*3e8
 end
 DLL_RMSE = norm(DLLError)/sqrt(runs)/fs*3e8
 
@@ -275,6 +287,15 @@ X_noiseless = real(SamplesData_noiseless);
 csvwrite('Data.csv',Data);
 csvwrite('AutoencoderData.csv',[real(SamplesData),X_noiseless]);
 
+%%
+if (true)
+    figure; scatter(multipathshifts/fs_hi*3e8,NNError_Keras/fs*3e8-0.3872,'.')
+    hold on; scatter(multipathshifts/fs_hi*3e8,0.94+DLLError/fs*3e8,'.')
+    legend('NN Error','E-P-L Error')
+    xlabel('Multipath Shift Delay (m)')
+    ylabel('Code Phase Error(m)')
+    grid on;
+end
 
 %%
 % clear X Y
