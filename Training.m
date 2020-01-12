@@ -23,8 +23,8 @@ fs_hi = 500e6;
 f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
-CNR_dB = 60;        % in dB-Hz
-runs = 1000;    % # runs
+CNR_dB = 35;        % in dB-Hz
+runs = 500;    % # runs
 n_multipath = 1; %Number of Multipath Components
 plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
@@ -69,6 +69,7 @@ end
 
 
 sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
+sigma_noise = 0;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
@@ -79,6 +80,7 @@ if (plotFlag)
     figure;
 end
 phase = 0;
+tic;
 for n = 1:runs
     %% Run Initialization
     clc;
@@ -101,6 +103,7 @@ for n = 1:runs
     code19_d = circshift(code19_hi,round(shift)+shift_center_hi);
     code19_Multipath = 0;
     
+    
     for ii = 1:n_multipath
         %multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi; %2.56,65.12
         multipath_shift_samples = 2*round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
@@ -114,21 +117,28 @@ for n = 1:runs
         Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
         %A_M = 1*10^(Att_db/20);
-        A_M = 10^-1.2;
-        %A_M = 0;
+        %A_M = 10^-1.2;
+        A_M = 0.5;
         code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
     end
     
-    thetas = 2*pi*fD*t_hi + phase;
-    phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
+%     thetas = 2*pi*fD*t_hi + phase;
+%     phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
     %thetas_lo = decimate(thetas,f_ratio);
-    thetas_lo = 2*pi*fD*t + phase;
-    phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
+%     thetas_lo = 2*pi*fD*t + phase;
+%     phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
     
     if(EstimateDoppler)
+        thetas = 2*pi*fD*t_hi + phase;
+        phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
+        
+        thetas_lo = 2*pi*fD*t + phase;
+        phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
+        
         thetashat = 2*pi*fDhat*t + phasehat;
         phasehat = phasehat + 2*pi*fDhat*(t(end) + 1/fs);
     else
+        phase = 0;
         thetas = 0;
         thetas_lo = 0;
         thetashat = thetas_lo;
@@ -181,15 +191,29 @@ for n = 1:runs
     e_t = C*L_t;
     shift_DLL_samples(n) = -e_t*fs;
     
-    %prompt_PRN = circshift(code19,shift_center + shift_DLL_samples(n));
-    %c_prompt = sum(prompt_PRN.*y.*exp(1i*thetashat))./length(code19_d);
-    %c_prompt1 = sum(prompt_PRN.*y.*exp(1i*thetas))./length(code19_d);
-    %I_Data(n) = real(c_prompt);
-    %I_Data1(n) = real(c_prompt1);
-
-
-    
     DLLError(n) = ShiftsData(n) - shift_DLL_samples(n);
+    %% HRC
+    B_HRC = 1;
+    
+    %delta_shift_DLL = round(fs/chip_rate/2);
+    %delta_shift_DLL = round(fs/chip_rate/2/10);
+    delta_shift_HRC = 1;
+    
+    early_PRN = circshift(code19, shift_center_lo - delta_shift_HRC -1);
+    late_PRN = circshift(code19, shift_center_lo + delta_shift_HRC -1);
+    early_PRN1 = circshift(code19, shift_center_lo - 2*delta_shift_HRC -1);
+    late_PRN1 = circshift(code19, shift_center_lo + 2*delta_shift_HRC -1);
+    
+    c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_late = sum(late_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_early1 = sum(early_PRN1.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_late1 = sum(late_PRN1.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    
+    L_HRC = (c_early - c_late) - 0.5*(c_early1 - c_late1);
+    e_HRC = C*L_HRC;
+    shift_HRC_samples(n) = -e_HRC*fs;
+    
+    HRCError(n) = ShiftsData(n) - shift_HRC_samples(n);
     %% PLL
     if EstimateDoppler
         u(n) = -atan(imag(c_prompt)./real(c_prompt));
@@ -199,7 +223,6 @@ for n = 1:runs
         o(n) = o(n)/2/pi;
         fDhat = o(n);
     end
-
     %% Prediction
     if (NNErrorFlag)
         %NNShift_Keras(n) = (PredictShift_2p5(real(SamplesData(n,:))));
@@ -212,7 +235,7 @@ for n = 1:runs
         %I_DataNN(n) = c_promptNN;
 
     end
-    %%
+    %% Plot
     if (plotFlag)
         %% Plot
         %Plot Actual
@@ -276,11 +299,16 @@ for n = 1:runs
        
     end
 end
+toc
 if (NNErrorFlag)
     NN_Keras_RMSE = norm(NNError_Keras)/sqrt(runs)/fs*3e8
     %NN_RMSE = norm(NNError)/sqrt(runs)/fs*3e8
 end
+
+HRC_RMSE = norm(HRCError)/sqrt(runs)/fs*3e8
+
 DLL_RMSE = norm(DLLError)/sqrt(runs)/fs*3e8
+
 
 Data = [real(SamplesData),ShiftsData1];
 X_noiseless = real(SamplesData_noiseless);
@@ -289,8 +317,9 @@ csvwrite('AutoencoderData.csv',[real(SamplesData),X_noiseless]);
 
 %%
 if (true)
-    figure; scatter(multipathshifts/fs_hi*3e8,NNError_Keras/fs*3e8-0.3872,'.')
-    hold on; scatter(multipathshifts/fs_hi*3e8,0.94+DLLError/fs*3e8,'.')
+    figure; scatter(multipathshifts/fs_hi*3e8,NNError_Keras/fs*3e8,'.')
+    hold on; scatter(multipathshifts/fs_hi*3e8,DLLError/fs*3e8,'.')
+    scatter(multipathshifts/fs_hi*3e8,HRCError/fs*3e8,'.')
     legend('NN Error','E-P-L Error')
     xlabel('Multipath Shift Delay (m)')
     ylabel('Code Phase Error(m)')

@@ -69,6 +69,7 @@ end
 
 
 sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
+sigma_noise = 0;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
@@ -88,7 +89,7 @@ for n = 1:runs
   
     noise1 = sigma_noise*randn(1,samplesPerCode);
     noise2 = sigma_noise*randn(1,samplesPerCode);
-    noise = 0*noise1 + 0*1i*noise2;
+    noise = 1*noise1 + 1*1i*noise2;
     
     %shift = shift_Tc/chip_rate*fs_hi*(2*(rand-0.5));
     shift = 0;
@@ -101,12 +102,13 @@ for n = 1:runs
     code19_d = circshift(code19_hi,round(shift)+shift_center_hi);
     code19_Multipath = 0;
     
+    
     for ii = 1:n_multipath
         %multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi; %2.56,65.12
         multipath_shift_samples = 2*round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
         multipathshifts(n) = 2*round((n-1)/runs*fs_hi/chip_rate);
         %theta =pi/sqrt(3)*randn;
-        theta = pi*rand;
+        theta = 0pi*rand;
         %a = -0.0032;b = -12.3;  
         %Linear Model for Attenuation
         a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
@@ -114,8 +116,8 @@ for n = 1:runs
         Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
         %A_M = 1*10^(Att_db/20);
-        A_M = 10^-1.2;
-        %A_M = 0.5;
+        %A_M = 10^-1.2;
+        A_M = 0.5;
         code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
     end
     
@@ -190,6 +192,28 @@ for n = 1:runs
 
     
     DLLError(n) = ShiftsData(n) - shift_DLL_samples(n);
+    %% HRC
+    B_HRC = 1;
+    
+    %delta_shift_DLL = round(fs/chip_rate/2);
+    %delta_shift_DLL = round(fs/chip_rate/2/10);
+    delta_shift_HRC = 1;
+    
+    early_PRN = circshift(code19, shift_center_lo - delta_shift_HRC -1);
+    late_PRN = circshift(code19, shift_center_lo + delta_shift_HRC -1);
+    early_PRN1 = circshift(code19, shift_center_lo - 2*delta_shift_HRC -1);
+    late_PRN1 = circshift(code19, shift_center_lo + 2*delta_shift_HRC -1);
+    
+    c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_late = sum(late_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_early1 = sum(early_PRN1.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    c_late1 = sum(late_PRN1.*y_lo.*exp(1i*thetashat))./length(y_lo);
+    
+    L_HRC = (c_early - c_late) - 0.5*(c_early1 - c_late1);
+    e_HRC = C*L_HRC;
+    shift_HRC_samples(n) = -e_HRC*fs;
+    
+    HRCError(n) = ShiftsData(n) - shift_HRC_samples(n);
     %% PLL
     if EstimateDoppler
         u(n) = -atan(imag(c_prompt)./real(c_prompt));
@@ -290,7 +314,8 @@ csvwrite('AutoencoderData.csv',[real(SamplesData),X_noiseless]);
 %%
 if (true)
     figure; scatter(multipathshifts/fs_hi*3e8,NNError_Keras/fs*3e8,'.')
-    hold on; scatter(multipathshifts/fs_hi*3e8,0.94+DLLError/fs*3e8,'.')
+    hold on; scatter(multipathshifts/fs_hi*3e8,DLLError/fs*3e8,'.')
+    scatter(multipathshifts/fs_hi*3e8,HRCError/fs*3e8,'.')
     legend('NN Error','E-P-L Error')
     xlabel('Multipath Shift Delay (m)')
     ylabel('Code Phase Error(m)')
