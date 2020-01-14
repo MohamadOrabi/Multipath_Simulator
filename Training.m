@@ -15,7 +15,9 @@ load('Elevations.mat')
 %fDs = fDmat(6,:);
 fDs = fDmat(1,:);
 
-%Constants
+                                              %To switch between training
+                                              %and envelop don't foget: 
+%Constants                                    %n_multipath,shift,multipath_shift, theta,A_M
 c = 299792458;
 chip_rate = 1.023e6;   %In Hz
 fs = 10e6;             %In Hz
@@ -26,6 +28,7 @@ shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
 runs = 500;    % # runs
 n_multipath = 1; %Number of Multipath Components
+envelope_flag = true;
 plotFlag = false;   %Set to plot
 NNErrorFlag = true; %Set to use NNDLL
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
@@ -69,7 +72,7 @@ end
 
 
 sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
-sigma_noise = 0;
+%sigma_noise = 0;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 %%
@@ -92,8 +95,12 @@ for n = 1:runs
     noise2 = sigma_noise*randn(1,samplesPerCode);
     noise = 1*noise1 + 1*1i*noise2;
     
-    %shift = shift_Tc/chip_rate*fs_hi*(2*(rand-0.5));
-    shift = 0;
+    shift = shift_Tc/chip_rate*fs_hi*(2*(rand-0.5));
+    if (envelope_flag)
+       shift = 0;
+       n_multipath = 1;
+    end
+    %shift = 0;
     %shift = 0*fs_hi/chip_rate;
     ShiftsData1(n) = shift;
     ShiftsData(n) = shift/f_ratio;
@@ -105,26 +112,33 @@ for n = 1:runs
     
     
     for ii = 1:n_multipath
-        %multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi; %2.56,65.12
-        multipath_shift_samples = 2*round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
-        multipathshifts(n) = 2*round((n-1)/runs*fs_hi/chip_rate);
-        %theta =pi/sqrt(3)*randn;
-        theta = pi*rand;
+        multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi; %2.56,65.12
+        %multipath_shift_samples = 2*round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
+        theta =pi/sqrt(3)*randn;
+        %theta = pi*rand;
         %a = -0.0032;b = -12.3;  
         %Linear Model for Attenuation
         a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
         b = -12.7 + (12.7-11.9)*rand();
         Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
         
-        %A_M = 1*10^(Att_db/20);
-        %A_M = 10^-1.2;
-        A_M = 0.5;
+        A_M = 1*10^(Att_db/20);
+        if (envelope_flag)
+            multipath_shift_samples = 2*round((n-1)/runs*fs_hi/chip_rate);
+            theta = pi*rand;
+            %batata = [0,pi];
+            %theta = batata(randi(2));
+            A_M = 0.5;
+            %A_M = 10^-1.2;
+        end
+        multipathshifts(n) = multipath_shift_samples;
+        
         code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
     end
     
 %     thetas = 2*pi*fD*t_hi + phase;
 %     phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
-    %thetas_lo = decimate(thetas,f_ratio);
+    %thetas_lo = decimate(thetas,f_ratio,1);
 %     thetas_lo = 2*pi*fD*t + phase;
 %     phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
     
@@ -149,13 +163,13 @@ for n = 1:runs
     %y = y.*A.^0.5.*exp(-1i*thetas);
     
     %Resampling to low fs
-    y_lo_noiseless = decimate(y,f_ratio);
+    y_lo_noiseless = decimate(y,f_ratio,1);
     y_lo = y_lo_noiseless + noise;
 
     y_lo = y_lo.*A.^0.5.*exp(-1i*thetas_lo);
     y_lo_noiseless = y_lo_noiseless.*A.^0.5.*exp(-1i*thetas_lo);
 
-    code19_d_lo = round(decimate(code19_d,f_ratio));
+    code19_d_lo = round(decimate(code19_d,f_ratio,1));
 
     R = Corr(y_lo.*exp(1i*thetashat),code19)./length(y_lo);
     R_noiseless = Corr(y_lo_noiseless.*exp(1i*thetashat),code19)./length(y_lo);
@@ -167,7 +181,7 @@ for n = 1:runs
     %SamplesData(n,:) = R(shift_center-delta_shift_samples:shift_center+delta_shift_samples);
 
     if (n_multipath > 0)
-        code19_Multipath_lo = decimate(code19_Multipath,f_ratio);
+        code19_Multipath_lo = decimate(code19_Multipath,f_ratio,1);
         R_M = Corr((code19_Multipath_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
     else
         R_M = zeros(size(R,1),size(R,2));
@@ -193,7 +207,7 @@ for n = 1:runs
     
     DLLError(n) = ShiftsData(n) - shift_DLL_samples(n);
     %% HRC
-    B_HRC = 1;
+    B_HRC = 2;
     
     %delta_shift_DLL = round(fs/chip_rate/2);
     %delta_shift_DLL = round(fs/chip_rate/2/10);
@@ -300,6 +314,7 @@ for n = 1:runs
     end
 end
 toc
+%% Calculate RMSE
 if (NNErrorFlag)
     NN_Keras_RMSE = norm(NNError_Keras)/sqrt(runs)/fs*3e8
     %NN_RMSE = norm(NNError)/sqrt(runs)/fs*3e8
@@ -315,21 +330,15 @@ X_noiseless = real(SamplesData_noiseless);
 csvwrite('Data.csv',Data);
 csvwrite('AutoencoderData.csv',[real(SamplesData),X_noiseless]);
 
-%%
+%% Plot Envelope
 if (true)
-    figure; scatter(multipathshifts/fs_hi*3e8,NNError_Keras/fs*3e8,'.')
+    figure; scatter(multipathshifts/fs_hi*3e8,-NNError_Keras/fs*3e8,'.')
     hold on; scatter(multipathshifts/fs_hi*3e8,DLLError/fs*3e8,'.')
     scatter(multipathshifts/fs_hi*3e8,HRCError/fs*3e8,'.')
+    
     legend('NN Error','E-P-L Error')
     xlabel('Multipath Shift Delay (m)')
-    ylabel('Code Phase Error(m)')
+    ylabel('Code Phase Error (m)')
+    title('Error Envelopes')
     grid on;
 end
-
-%%
-% clear X Y
-% for i = 1:length(Data)
-%     X(1,1:40,1,i) = Data(i,1:40);
-%     Y(1,1,1,i) = Data(i,41);
-% end
-% 

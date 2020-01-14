@@ -4,7 +4,7 @@ clear all
 
 %% Initialization
 
-net = importKerasNetwork('modelRegression_10mhz.h5') %Imports the Keras network
+net = importKerasNetwork('modelRegression_10mhz_env.h5') %Imports the Keras network
 %load('means.mat')  %Used for scaling inputs to NN
 %load('stds.mat')
 load('fDmat.mat')   % In Hz
@@ -18,7 +18,7 @@ sat = 9;    %Do not change now!  7
 pseudorange(sat,:) = interpolatevec(pseudoranges(sat,:));
 fDs = interpolatevec(fDmat(sat,:));
 El = interpolatevec(Elevations(sat,:))*180/pi;
-skip = 500;
+skip = 0;
 pseudorange(sat,:) = circshift(pseudorange(sat,:),-skip);
 fDs = circshift(fDs,-skip);
 El = circshift(El,-skip);
@@ -35,8 +35,8 @@ f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 200;    % # code_lengths to process
-n_multipath = 0; % Number of Multipath Components
+runs = 600;    % # code_lengths to process
+n_multipath = 7; % Number of Multipath Components
 
 %Flags ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 plotFlag = false;   %Set to plot.. plotting is currently very slow
@@ -108,13 +108,13 @@ phase = 0;
 for n = 1:runs
     %% Run Initialization
     
-%     if (n<round(runs/3))
-%         n_multipath = 0;
-%     elseif (n<round(2*runs/3))
-%         n_multipath = 1;
-%     else
-%         n_multipath = 7;
-%     end
+    if (n<round(runs/3))
+        n_multipath = 0;
+    elseif (n<round(2*runs/3))
+        n_multipath = 1;
+    else
+        n_multipath = 7;
+    end
     
     clc;
     n/runs*100
@@ -158,7 +158,7 @@ for n = 1:runs
     
     thetas = 2*pi*fD*t_hi + phase;
     phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
-    %thetas_lo = decimate(thetas,f_ratio);
+    %thetas_lo = decimate(thetas,f_ratio,1);
     thetas_lo = 2*pi*fD*t + phase;
     phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
     
@@ -176,13 +176,13 @@ for n = 1:runs
     %y = y.*A.^0.5.*exp(-1i*thetas);
     
     %Resampling to low fs
-    y_lo_noiseless = decimate(y,f_ratio);
+    y_lo_noiseless = decimate(y,f_ratio,1);
     y_lo = y_lo_noiseless + noise;
 
     y_lo = y_lo.*A.^0.5.*exp(-1i*thetas_lo);
     y_lo_noiseless = y_lo_noiseless.*A.^0.5.*exp(-1i*thetas_lo);
 
-    code19_d_lo = round(decimate(code19_d,f_ratio));
+    code19_d_lo = round(decimate(code19_d,f_ratio,1));
 
     R = Corr(y_lo.*exp(1i*thetashat),code19)./length(y_lo);
     R_noiseless = Corr(y_lo_noiseless.*exp(1i*thetashat),code19)./length(y_lo);
@@ -202,7 +202,7 @@ for n = 1:runs
     end
 
     if (n_multipath > 0)
-        code19_Multipath_lo = decimate(code19_Multipath,f_ratio);
+        code19_Multipath_lo = decimate(code19_Multipath,f_ratio,1);
         R_M = Corr((code19_Multipath_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
     else
         R_M = zeros(size(R,1),size(R,2));
@@ -250,7 +250,7 @@ for n = 1:runs
     
     %delta_shift_DLL = round(fs/chip_rate/2);
     %delta_shift_DLL = round(fs/chip_rate/2/10);
-    delta_shift_HRC = 2;
+    delta_shift_HRC = 1;
     
     early_PRN = circshift(code19, round(codeshift.HRC(n)) - delta_shift_HRC -1);
     late_PRN = circshift(code19, round(codeshift.HRC(n)) + delta_shift_HRC -1);
@@ -388,11 +388,12 @@ plot(codeshift.DLL(2:n+1));
 if (NarrowCorrelatorFlag)
     plot(codeshift.Narrow_DLL(2:n+1));
 end
+
+plot(real(codeshift.HRC(2:n+1)));
+
 if(NNFlag)
     plot(codeshift.NN(2:n+1));
 end
-
-plot(real(codeshift.HRC(2:n+1)));
 
 plot(ShiftsData(1:n));
 
@@ -402,4 +403,4 @@ plot(ShiftsData(1:n));
 xline(round(runs/3));
 xline(round(runs*2/3));
 
-legend('Estimated Shift DLL','Estimated Shift Narrow Correlator', 'Estimated Shift NN','HRC', 'True Shift')
+legend('Estimated Shift DLL','Estimated Shift Narrow Correlator','HRC', 'Estimated Shift NN', 'True Shift')

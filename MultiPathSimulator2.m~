@@ -18,7 +18,10 @@ sat = 9;    %Do not change now!  7
 pseudorange(sat,:) = interpolatevec(pseudoranges(sat,:));
 fDs = interpolatevec(fDmat(sat,:));
 El = interpolatevec(Elevations(sat,:))*180/pi;
-pseudorange(sat,1:500) = []
+skip = 0;
+pseudorange(sat,:) = circshift(pseudorange(sat,:),-skip);
+fDs = circshift(fDs,-skip);
+El = circshift(El,-skip);
 
 %fDs = fDmat(6,:);
 %fDs = fDmat(sat,:);
@@ -32,8 +35,8 @@ f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
 CNR_dB = 35;        % in dB-Hz
-runs = 200;    % # code_lengths to process
-n_multipath = 0; % Number of Multipath Components
+runs = 1000;    % # code_lengths to process
+n_multipath = 7; % Number of Multipath Components
 
 %Flags ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 plotFlag = false;   %Set to plot.. plotting is currently very slow
@@ -105,13 +108,13 @@ phase = 0;
 for n = 1:runs
     %% Run Initialization
     
-%     if (n<round(runs/3))
-%         n_multipath = 0;
-%     elseif (n<round(2*runs/3))
-%         n_multipath = 1;
-%     else
-%         n_multipath = 7;
-%     end
+    if (n<round(runs/3))
+        n_multipath = 0;
+    elseif (n<round(2*runs/3))
+        n_multipath = 1;
+    else
+        n_multipath = 7;
+    end
     
     clc;
     n/runs*100
@@ -385,11 +388,12 @@ plot(codeshift.DLL(2:n+1));
 if (NarrowCorrelatorFlag)
     plot(codeshift.Narrow_DLL(2:n+1));
 end
+
+plot(real(codeshift.HRC(2:n+1)));
+
 if(NNFlag)
     plot(codeshift.NN(2:n+1));
 end
-
-plot(real(codeshift.HRC(2:n+1)));
 
 plot(ShiftsData(1:n));
 
@@ -399,4 +403,4 @@ plot(ShiftsData(1:n));
 xline(round(runs/3));
 xline(round(runs*2/3));
 
-legend('Estimated Shift DLL','Estimated Shift Narrow Correlator', 'Estimated Shift NN','HRC', 'True Shift')
+legend('Estimated Shift DLL','Estimated Shift Narrow Correlator','HRC', 'Estimated Shift NN', 'True Shift')

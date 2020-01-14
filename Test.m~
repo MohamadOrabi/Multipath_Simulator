@@ -118,11 +118,33 @@ plot(calculated_pr);
 
 %% Get Erros in seperate regions
 runs = length(NNError);
-n_2 = length(NNError(round(runs/3):round(2*runs/3)));
+n_2 = length(NNError(round(runs/3):round(2*runs/3)-1))
+n_1 = length(NNError([1:round(runs/3)-1]))
+n_3 = length(NNError([round(2*runs/3):end]))
 
-NN_RMSE = norm(NNError(round(runs/3):round(2*runs/3)))/sqrt(n_2)/fs*c
-Narrow_DLL_RMSE = norm(Narrow_DLLError(round(runs/3):round(2*runs/3)))/sqrt(n_2)/fs*c
-DLL_RMSE = norm(DLLError(round(runs/3):round(2*runs/3)))/sqrt(n_2)/fs*c
+%Region1
+NN_RMSE1 = norm(NNError([1:round(runs/3)-1]))/sqrt(n_1)/fs*c;
+HRC_RMSE1 = norm(HRCError([1:round(runs/3)-1]))/sqrt(n_1)/fs*c;
+Narrow_DLL_RMSE1 = norm(Narrow_DLLError([1:round(runs/3)-1]))/sqrt(n_1)/fs*c;
+DLL_RMSE1 = norm(DLLError([1:round(runs/3)-1]))/sqrt(n_1)/fs*c;
+
+%Region2
+NN_RMSE2 = norm(NNError(round(runs/3):round(2*runs/3)-1))/sqrt(n_2)/fs*c;
+HRC_RMSE2 = norm(HRCError(round(runs/3):round(2*runs/3)-1))/sqrt(n_2)/fs*c;
+Narrow_DLL_RMSE2 = norm(Narrow_DLLError(round(runs/3):round(2*runs/3)-1))/sqrt(n_2)/fs*c;
+DLL_RMSE2 = norm(DLLError(round(runs/3):round(2*runs/3)-1))/sqrt(n_2)/fs*c;
+
+%Region3
+NN_RMSE3 = norm(NNError([round(2*runs/3):end]))/sqrt(n_3)/fs*c;
+HRC_RMSE3 = norm(HRCError([round(2*runs/3):end]))/sqrt(n_3)/fs*c;
+Narrow_DLL_RMSE = norm(Narrow_DLLError([round(2*runs/3):end]))/sqrt(n_3)/fs*c;
+DLL_RMSE = norm(HRCError([round(2*runs/3):end]))/sqrt(n_3)/fs*c;
+%Narrow_DLL_RMSE = norm(Narrow_DLLError([round(2*runs/3):end]))/sqrt(n_3)/fs*c
+%DLL_RMSE = norm(DLLError([round(2*runs/3):end]))/sqrt(n_3)/fs*c
+[NN_RMSE1,NN_RMSE2,NN_RMSE3]
+[HRC_RMSE1,HRC_RMSE2,HRC_RMSE3]
+
+
 
 
 
