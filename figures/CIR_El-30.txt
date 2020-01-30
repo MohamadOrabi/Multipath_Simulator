@@ -1,0 +1,40 @@
+CIR - El-30
+
+NN_RMSE =
+
+    1.3188
+
+
+HRC_RMSE =
+
+    1.4160
+
+
+Narrow_DLL_RMSE =
+
+    1.4996
+
+
+DLL_RMSE =
+
+    2.1672
+
+
+NN_RMSE =
+
+    1.3255    1.3120
+
+
+HRC_RMSE =
+
+    1.0262    1.7193
+
+
+Narrow_DLL_RMSE =
+
+    0.8197    1.9556
+
+
+DLL_RMSE =
+
+    1.5085    2.6676

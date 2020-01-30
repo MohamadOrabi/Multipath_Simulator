@@ -1,10 +1,12 @@
 clc
 %close all
 clear all
+clear classes
+
 
 %% Initialization
 
-net = importKerasNetwork('modelRegression_10mhz_env.h5') %Imports the Keras network
+net = importKerasNetwork('modelRegression_10mhz.h5') %Imports the Keras network
 %load('means.mat')  %Used for scaling inputs to NN
 %load('stds.mat')
 load('fDmat.mat')   % In Hz
@@ -34,16 +36,19 @@ fs_hi = 500e6;
 f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
-CNR_dB = 35;        % in dB-Hz
-runs = 600;    % # code_lengths to process
-n_multipath = 7; % Number of Multipath Components
+CNR_dB = 50;        % in dB-Hz
+runs = 5000;    % # code_lengths to process
+n_multipath = 1; % Number of Multipath Components
 
 %Flags ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 plotFlag = false;   %Set to plot.. plotting is currently very slow
+useCIR = true;
+plotCIR = false;
 NNFlag = true;  %Set to use NNDLL
 NarrowCorrelatorFlag = true;    %Set to use narrow correlator
 EstimateDoppler = false; %Set to use PLL to estimate doppler frequency
 SaveRFlag = false;
+shift_right = 1;
 %~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 delta_shift_codes = 2;  %Delta Codes used as input to DLL
 delta_shift_samples = round(delta_shift_codes*fs/chip_rate);
@@ -82,8 +87,114 @@ if EstimateDoppler
     phasehat = 0;
 end
 
+if(useCIR)
+   %% CIR Initialization
+pth = cd;
+addpath(pth,'LandMobileMultipathChannelModel32');
+addpath ([pth,'/LandMobileMultipathChannelModel32','/Knife Edge']);
+addpath ([pth,'/LandMobileMultipathChannelModel32/Parameter Files']);
+
+Parameters.SampFreq=1e3;        % Hz
+Parameters.MaximumSpeed=7;      % km/h
+Parameters.SatElevation=30;     % Deg
+Parameters.SatAzimut=-45;       % Deg (North == 0, East == 90, South == 180, West == 270)
+%Parameters.NumberOfSteps=500;
+
+% ---- General Parameters ----
+
+ChannelParams.CarrierFreq=1.57542e9;     % Hz
+ChannelParams.SampFreq=Parameters.SampFreq;
+ChannelParams.EnableDisplay=0;           % 3D visualization is not available in the free version
+ChannelParams.EnableCIRDisplay=1;        % enables CIR display
+
+% ---- Mode Parameters ----
+
+ChannelParams.UserType = 'Car';
+ChannelParams.Surrounding = 'Urban';
+ChannelParams.AntennaHeight = 1;         % m Height of the Antenna
+ChannelParams.MinimalPowerdB=-40;        % Echos below this Limit are not initialised
+
+% ---- UserParameters ---
+
+ChannelParams.DistanceFromRoadMiddle=-6.5;% negative: continental (right), positive: England (left)
+
+% ---- Graphics Parameters ---           
+
+ChannelParams.GraphicalPlotArea=50;      % 
+ChannelParams.ViewVector = [-60,20];     % 3D visualization is not available in the free version
+ChannelParams.RoadWidth = 10;            %
+
+% --- Building Params ---
+
+ChannelParams.BuildingRow1=1;            % logigal to switch Building Row right(heading 0 deg) on
+ChannelParams.BuildingRow2=1;            % logigal to switch Building Row left (heading 0 deg) on
+ChannelParams.BuildingRow1YPosition=-8;  % m
+ChannelParams.BuildingRow2YPosition=8;   % m
+
+ChannelParams.HouseWidthMean=22;         % m
+ChannelParams.HouseWidthSigma=25;        % m
+ChannelParams.HouseWidthMin=10;          % m
+ChannelParams.HouseHeightMin=4;          % m
+ChannelParams.HouseHeightMax=50;         % m
+ChannelParams.HouseHeightMean=16;        % m
+ChannelParams.HouseHeightSigma=6.4;      % m
+ChannelParams.GapWidthMean=27;           % m
+ChannelParams.GapWidthSigma=25;          % m
+ChannelParams.GapWidthMin=10;            % m
+ChannelParams.BuildingGapLikelihood=0.18;% lin Value
+
+% --- Tree Params ---
+
+ChannelParams.TreeHeight = 6;            % m
+ChannelParams.TreeDiameter = 3;          % m
+ChannelParams.TreeTrunkLength=2;         % m
+ChannelParams.TreeTrunkDiameter=.2;      % m
+
+ChannelParams.TreeAttenuation = 1.1;     % dB/m
+
+ChannelParams.TreeRow1Use=1;             % logical switches tree row 1 on
+ChannelParams.TreeRow2Use=1;             % logical switches tree row 2 on
+
+ChannelParams.TreeRow1YPosition=-6;      % m
+ChannelParams.TreeRow2YPosition=6;       % m
+
+ChannelParams.TreeRow1YSigma=0.5;        % m
+ChannelParams.TreeRow2YSigma=0.5;        % m
+
+ChannelParams.TreeRow1MeanDistance=60;   % m
+ChannelParams.TreeRow2MeanDistance=40;   % m
+
+ChannelParams.TreeRow1DistanceSigma=20;  % m
+ChannelParams.TreeRow2DistanceSigma=20;  % m
+
+% --- Pole Params ---
+
+ChannelParams.PoleHeight = 10;           % m
+ChannelParams.PoleDiameter = .2;         % m
+
+ChannelParams.PoleRow1Use=1;             % logical switches Pole row 1 on
+ChannelParams.PoleRow2Use=0;             % logical switches Pole row 2 on
+
+ChannelParams.PoleRow1YPosition=-6;      % m
+ChannelParams.PoleRow2YPosition=0;       % m
+
+ChannelParams.PoleRow1YSigma=0.5;        % m
+ChannelParams.PoleRow2YSigma=0.5;        % m
+
+ChannelParams.PoleRow1MeanDistance=25;   % m
+ChannelParams.PoleRow2MeanDistance=10;   % m
+
+ChannelParams.PoleRow1DistanceSigma=10;  % m
+ChannelParams.PoleRow2DistanceSigma=10;  % m
+
+% --- Initialising the channel object ---
+pause(1)
+disp('Initialising the channel ...')
+TheChannelObject=LandMobileMultipathChannel(ChannelParams); 
+end
+
 sigma_noise = sqrt(0.0005/(10.^(CNR_dB/10)))*samplesPerCode;
-sigma_noise = 0;
+%sigma_noise = 0;
 Tc = 1/chip_rate;
 C = Tc/2/(1 - 2*(sigma_noise/samplesPerCode)^2);
 
@@ -103,18 +214,41 @@ codeshift.HRC(1) = round(shift_center_hi + mod(pseudorange(sat,1),300e3)/c*fs); 
 if (plotFlag)
     figure;
 end
+if (plotCIR)
+    hh = figure; 
+    subplot(211)
+    xlabel('Delay in s')
+    ylabel('Amplitude')
+    axis([-2e-8,40e-8,0,1.5])
+    %set(get(hh,'Children'),'YTickLabel',[-40 -30 -20 -10 0 10]);
+    hold on
+    grid on
+    plot (0,0,'r')
+    plot (0,0)
+    legend ('Direct paths','Echo paths')
+
+    subplot(212)
+    xlabel('Delay in s')
+    ylabel('Phase in rad')
+    axis([-2e-8,40e-8,-pi,pi])
+    hold on
+    grid on
+end
 
 phase = 0;
 for n = 1:runs
     %% Run Initialization
     
-    if (n<round(runs/3))
+    if (n<round(runs/2))
         n_multipath = 0;
-    elseif (n<round(2*runs/3))
-        n_multipath = 1;
     else
         n_multipath = 7;
     end
+%     elseif (n<round(2*runs/3))
+%         n_multipath = 1;
+%     else
+%         n_multipath = 7;
+%     end
     
     clc;
     n/runs*100
@@ -138,27 +272,61 @@ for n = 1:runs
     code19_Multipath = 0;
     
     %Generate Multipath Signals
-    [gamma,varsigma] = getGammaParams(El(n));
-    for ii = 1:n_multipath
-        multipath_shift_samples = gamrnd(gamma,varsigma)/c*fs_hi; %2.56,65.12
-        %multipath_shift_samples = round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
-        %multipathshifts(n) = round((n-1)/runs*fs_hi/chip_rate);
-        theta =pi/sqrt(3)*randn;
-        %theta = 0;
-        %Linear Model for Attenuation
-        %a = -0.0032;b = -12.3;  
-        a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
-        b = -12.7 + (12.7-11.9)*rand();
-        Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
-        
-        A_M = 1*10^(Att_db/20);
-        %A_M = 0.5;
-        code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
+    if (useCIR & n_multipath > 0)
+
+        Parameters.SatElevation = El(n)-30;
+        CIR_time = n/Parameters.SampFreq;
+        ActualSpeed=Parameters.MaximumSpeed/2/3.6*(1+sin(CIR_time));   
+        ActualHeading=20*sin(CIR_time);     % Deg (North == 0, East == 90, South == 180, West == 270)
+
+        [TheChannelObject,LOS,LOSDelays,ComplexOutputVec,DelayVec,EchoNumberVec,WayVec(n),CIR_time]=generate(TheChannelObject,ActualSpeed,ActualHeading,Parameters.SatElevation,Parameters.SatAzimut);
+        LOS_mag = abs(LOS(1));
+        LOS_phase = angle(LOS(1));
+        for ii = 1:length(DelayVec)
+            multipath_shift_samples = DelayVec(ii)*fs_hi;
+            theta = angle(ComplexOutputVec(ii)) - LOS_phase; %This is to keep LOS doppler = 1
+            A_M = abs(ComplexOutputVec(ii))/LOS_mag; %This is to keep the LOS amplitude = 1
+            multipath_amplitudes(n,ii) = A_M;
+            code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
+        end
+
+        if (plotCIR)
+            figure(hh);
+            subplot(211)
+            cla
+            title(['Channel Impulse Response (CIR), T = ',num2str(CIR_time,'%5.2f'),' s, v = ',num2str(ActualSpeed*3.6,'%4.1f'),' km/h'])
+            stem(LOSDelays,abs(1),'r');
+            stem(DelayVec,abs(ComplexOutputVec)/abs(LOS));
+
+            subplot(212)
+            cla
+            stem(LOSDelays,angle(LOS),'r');
+            stem(DelayVec,angle(ComplexOutputVec));
+        end
+    
+    else
+        [gamma,varsigma] = getGammaParams(El(n));
+        for ii = 1:n_multipath
+            multipath_shift_samples = gamrnd(gamma,varsigma)/c*fs_hi; %2.56,65.12
+            %multipath_shift_samples = round((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
+            %multipathshifts(n) = round((n-1)/runs*fs_hi/chip_rate);
+            theta =pi/sqrt(3)*randn;
+            %theta = 0;
+            %Linear Model for Attenuation
+            a = -0.0032;b = -12.3;  
+            a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
+            b = -12.7 + (12.7-11.9)*rand();
+            Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
+
+            A_M = 1*10^(Att_db/20);
+            %A_M = 0.5;
+            code19_Multipath = code19_Multipath + A_M*exp(1i*theta)*circshift(code19_hi,round(shift + multipath_shift_samples)+shift_center_hi);
+        end
     end
     
     thetas = 2*pi*fD*t_hi + phase;
     phase = phase + 2*pi*fD*(t_hi(end) + 1/fs_hi);
-    %thetas_lo = decimate(thetas,f_ratio,1);
+    %thetas_lo = decimate(thetas,f_ratio,1,'fir');
     thetas_lo = 2*pi*fD*t + phase;
     phase_lo = phase + 2*pi*fD*(t(end) + 1/fs);
     
@@ -176,13 +344,13 @@ for n = 1:runs
     %y = y.*A.^0.5.*exp(-1i*thetas);
     
     %Resampling to low fs
-    y_lo_noiseless = decimate(y,f_ratio,1);
+    y_lo_noiseless = decimate(y,f_ratio,1,'fir');
     y_lo = y_lo_noiseless + noise;
 
     y_lo = y_lo.*A.^0.5.*exp(-1i*thetas_lo);
     y_lo_noiseless = y_lo_noiseless.*A.^0.5.*exp(-1i*thetas_lo);
 
-    code19_d_lo = round(decimate(code19_d,f_ratio,1));
+    code19_d_lo = round(decimate(code19_d,f_ratio,1,'fir'));
 
     R = Corr(y_lo.*exp(1i*thetashat),code19)./length(y_lo);
     R_noiseless = Corr(y_lo_noiseless.*exp(1i*thetashat),code19)./length(y_lo);
@@ -194,15 +362,16 @@ for n = 1:runs
     
     %Calculating the SamplesData
     if (~NNFlag)
-        SamplesData(n,:) = R(round(codeshift.DLL(n))-delta_shift_samples+1:round(codeshift.DLL(n))+delta_shift_samples);
+        SamplesData(n,:) = R(round(codeshift.DLL(n))-delta_shift_samples+1 + 1*shift_right:round(codeshift.DLL(n))+delta_shift_samples + 1*shift_right);
         SamplesData_noiseless(n,:) = R_noiseless(round(codeshift.DLL(n))-delta_shift_samples+1:round(codeshift.DLL(n))+delta_shift_samples);
     else
-        SamplesData(n,:) = R(round(codeshift.NN(n))-delta_shift_samples+1:round(codeshift.NN(n))+delta_shift_samples);
+        SamplesData(n,:) = R(round(codeshift.NN(n))-delta_shift_samples+1 + 1*shift_right:round(codeshift.NN(n))+delta_shift_samples+ 1*shift_right);
+        %SamplesData(n,:) = SamplesData(n,:)/max(SamplesData(n,:));
         SamplesData_noiseless(n,:) = R_noiseless(round(codeshift.NN(n))-delta_shift_samples+1:round(codeshift.NN(n))+delta_shift_samples);     
     end
 
-    if (n_multipath > 0)
-        code19_Multipath_lo = decimate(code19_Multipath,f_ratio,1);
+    if (length(code19_Multipath) > 2)
+        code19_Multipath_lo = decimate(code19_Multipath,f_ratio,1,'fir');
         R_M = Corr((code19_Multipath_lo).*exp(-1i*(thetas_lo-thetashat)),code19)./length(y_lo);
     else
         R_M = zeros(size(R,1),size(R,2));
@@ -211,9 +380,9 @@ for n = 1:runs
     B_DLL = 1;
     
     delta_shift_DLL = round(fs/chip_rate/2);
-    prompt_PRN = circshift(code19,round(codeshift.DLL(n)) - 1);
-    early_PRN = circshift(code19, round(codeshift.DLL(n)) - delta_shift_DLL - 1);
-    late_PRN = circshift(code19, round(codeshift.DLL(n)) + delta_shift_DLL - 1);
+    prompt_PRN = circshift(code19,round(codeshift.DLL(n)) - 1+1*shift_right);
+    early_PRN = circshift(code19, round(codeshift.DLL(n)) - delta_shift_DLL - 1+1*shift_right);
+    late_PRN = circshift(code19, round(codeshift.DLL(n)) + delta_shift_DLL - 1+1*shift_right);
     
     c_prompt = sum(prompt_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
     c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
@@ -230,9 +399,9 @@ for n = 1:runs
         B_DLL_N = 1;
 
         delta_shift_DLL_narrow = 1;
-        prompt_PRN = circshift(code19,round(codeshift.Narrow_DLL(n)) - 1);
-        early_PRN = circshift(code19, round(codeshift.Narrow_DLL(n)) - delta_shift_DLL_narrow - 1);
-        late_PRN = circshift(code19, round(codeshift.Narrow_DLL(n)) + delta_shift_DLL_narrow - 1);
+        prompt_PRN = circshift(code19,round(codeshift.Narrow_DLL(n)) - 1+1*shift_right);
+        early_PRN = circshift(code19, round(codeshift.Narrow_DLL(n)) - delta_shift_DLL_narrow - 1+1*shift_right);
+        late_PRN = circshift(code19, round(codeshift.Narrow_DLL(n)) + delta_shift_DLL_narrow - 1+1*shift_right);
 
         c_prompt_narrow = sum(prompt_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
         c_early_narrow = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
@@ -252,10 +421,10 @@ for n = 1:runs
     %delta_shift_DLL = round(fs/chip_rate/2/10);
     delta_shift_HRC = 1;
     
-    early_PRN = circshift(code19, round(codeshift.HRC(n)) - delta_shift_HRC -1);
-    late_PRN = circshift(code19, round(codeshift.HRC(n)) + delta_shift_HRC -1);
-    early_PRN1 = circshift(code19, round(codeshift.HRC(n)) - 2*delta_shift_HRC -1);
-    late_PRN1 = circshift(code19, round(codeshift.HRC(n)) + 2*delta_shift_HRC -1);
+    early_PRN = circshift(code19, round(codeshift.HRC(n)) - delta_shift_HRC -1+1*shift_right);
+    late_PRN = circshift(code19, round(codeshift.HRC(n)) + delta_shift_HRC -1+1*shift_right);
+    early_PRN1 = circshift(code19, round(codeshift.HRC(n)) - 2*delta_shift_HRC -1+1*shift_right);
+    late_PRN1 = circshift(code19, round(codeshift.HRC(n)) + 2*delta_shift_HRC -1+1*shift_right);
     
     c_early = sum(early_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);
     c_late = sum(late_PRN.*y_lo.*exp(1i*thetashat))./length(y_lo);

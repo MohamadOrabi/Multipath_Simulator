@@ -13,23 +13,24 @@ f_ratio = fs_hi/fs;
 code19_hi = resample_PRN(code19,samplesPerCode_hi,chip_rate,fs_hi,0);
 code19_1 = resample_PRN(code19,samplesPerCode,chip_rate,fs,0);
 
-shift_lo = 500;
+shift_lo = 1;
 shift_hi = round(shift_lo*f_ratio);
 shift = shift_lo*chip_rate/fs;
 
 code19_d1 = circshift(code19_hi, shift_hi);
-code19_d1 = round(decimate(code19_d1, f_ratio));
+code19_d1 = round(decimate(code19_d1, f_ratio,'fir',1));
 
+batata = circshift(code19_1,-1);
 code19_d2 = resample_PRN1(code19,samplesPerCode,chip_rate,fs,shift);
-code19_d3 = resample_PRN1(code19,samplesPerCode,chip_rate,fs,1*0.5);
+code19_d3 = resample_PRN1(code19,samplesPerCode,chip_rate,fs,1*1);
 
 
 figure;
 hold on;
 %stairs(code19_d1)
-stairs(code19_d2)
+stairs(batata+2.2)
 stairs(code19_d3)
-ylim([-1.5,1.5])
+%ylim([-1.5,1.5])
 
 figure;
 plot(Corr(code19_d2,code19_d3)/length(code19_d2))
@@ -145,5 +146,37 @@ HRC_RMSE = [HRC_RMSE1,HRC_RMSE2,HRC_RMSE3]
 Narrow_DLL_RMSE = [Narrow_DLL_RMSE1,Narrow_DLL_RMSE2,Narrow_DLL_RMSE3]
 DLL_RMSE = [DLL_RMSE1,DLL_RMSE2,DLL_RMSE3]
 
+%% 2 regions
 
+runs = length(NNError);
+n_2 = length(NNError(round(runs/2):end));
+n_1 = length(NNError([1:round(runs/2)-1]));
 
+%Region1
+NN_RMSE1 = norm(NNError([1:round(runs/2)-1]))/sqrt(n_1)/fs*c;
+HRC_RMSE1 = norm(HRCError([1:round(runs/2)-1]))/sqrt(n_1)/fs*c;
+Narrow_DLL_RMSE1 = norm(Narrow_DLLError([1:round(runs/2)-1]))/sqrt(n_1)/fs*c;
+DLL_RMSE1 = norm(DLLError([1:round(runs/2)-1]))/sqrt(n_1)/fs*c;
+
+%Region2
+NN_RMSE2 = norm(NNError(round(runs/2):end))/sqrt(n_2)/fs*c;
+HRC_RMSE2 = norm(HRCError(round(runs/2):end))/sqrt(n_2)/fs*c;
+Narrow_DLL_RMSE2 = norm(Narrow_DLLError(round(runs/2):end))/sqrt(n_2)/fs*c;
+DLL_RMSE2 = norm(DLLError(round(runs/2):end))/sqrt(n_2)/fs*c;
+
+NN_RMSE = [NN_RMSE1,NN_RMSE2]
+HRC_RMSE = [HRC_RMSE1,HRC_RMSE2]
+Narrow_DLL_RMSE = [Narrow_DLL_RMSE1,Narrow_DLL_RMSE2]
+DLL_RMSE = [DLL_RMSE1,DLL_RMSE2]
+
+%% Plot Training
+train = csvread('run-20200125-213735_train-tag-epoch_mse.csv');
+validation = csvread('run-20200125-213735_validation-tag-epoch_mse.csv');
+
+figure; hold on; grid on;
+plot(train(:,3))
+plot(validation(:,3))
+legend('Training', 'Validation')
+title('Epoch MSE')
+xlabel('Epoch')
+ylabel('MSE')
