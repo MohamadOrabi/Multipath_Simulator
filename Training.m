@@ -50,14 +50,14 @@ fs_hi = 2.5e6;
 f_ratio = fs_hi/fs;
 fD = 0;             % In Hz
 shift_Tc = 0.5;    %max shift, in chips
-CNR_dB = 45;        % in dB-Hz
-runs = 5000;    % # runs
+CNR_dB = 500;        % in dB-Hz
+runs = 500;    % # runs
 n_multipath = 0; %Number of Multipath Components
 
 useCIR = false;
 plotCIR = false;
 
-envelope_flag = false;
+envelope_flag = true;
 plotFlag = false;   %Set to plot
 NNErrorFlag = false; %Set to use NNDLL
 shift_right = 0;
@@ -229,8 +229,8 @@ for n = 1:runs
     
     fD = 0;%fDs(n);
     
-    A_LOS = 1+randn*0.15;
-    %A_LOS = 0.5;
+    %A_LOS = 1+randn*0.15;
+    A_LOS = 1;
   
     noise1 = sigma_noise*randn(1,samplesPerCode);
     noise2 = sigma_noise*randn(1,samplesPerCode);
@@ -292,21 +292,21 @@ for n = 1:runs
     else
     
         for ii = 1:n_multipath
-            %multipath_shift_samples = gamrnd(2.56,65.12)/c*fs_hi; %2.56,65.12
-            multipath_shift_samples = randn()*1*fs/chip_rate;
+            multipath_shift_samples = gamrnd(2.56,65.12)/c*fs; %2.56,65.12
+            %multipath_shift_samples = randn()*1*fs/chip_rate;
             %multipath_shift_samples = 2*ceil((n-1)/runs*fs_hi/chip_rate); %2.56,65.12
             theta =pi/sqrt(3)*randn;
             %theta = pi*randn;
             %Linear Model for Attenuation
-            %a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
-            %b = -12.7 + (12.7-11.9)*rand();
-            %Att_db = a*(multipath_shift_samples)/fs_hi*1e3 + b;
-            Att_db = 0.25*rand();
+            a = -0.0039 + (0.0039-0.0025)*rand();   % a = (-0.0039,-0.0025)
+            b = -12.7 + (12.7-11.9)*rand();
+            Att_db = a*(multipath_shift_samples)/fs*1e3 + b;
+            %Att_db = 0.25*rand();
 
             A_M = 1*10^(Att_db/20);
             if (envelope_flag)
                 %multipath_shift_samples = 2*ceil((n-1)/runs*fs_hi/chip_rate);
-                multipath_shift_samples = 2*(n-1)/runs*fs/chip_rate;
+                multipath_shift_samples = 5*(n-1)/runs*fs/chip_rate;
 
                 %theta = pi*rand;
                 batata = [0,pi];
@@ -541,7 +541,7 @@ if (envelope_flag)
 %     hold on; scatter(multipathshifts/fs_hi*3e8,DLLError/fs*3e8,'.')
 %     scatter(multipathshifts/fs_hi*3e8,HRCError/fs*3e8,'.')
     
-    figure; scatter(multipathshifts/fs*3e8,NNError_Keras/fs*3e8,'.')
+    figure; %scatter(multipathshifts/fs*3e8,NNError_Keras/fs*3e8,'.')
     hold on; scatter(multipathshifts/fs*3e8,DLLError/fs*3e8,'.')
     scatter(multipathshifts/fs*3e8,HRCError/fs*3e8,'.')
     

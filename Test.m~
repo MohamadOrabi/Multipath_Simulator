@@ -2,7 +2,7 @@
 [CAcode19, code19] = generate_PRN(3,6);     %for PRN 19
 
 fs = 2.5e6;
-fs_hi = 500e6;
+fs_hi = 500e9;
 f_ratio = fs_hi/fs;
 
 samplesPerCode = floor(fs/chip_rate*1023);
@@ -10,10 +10,11 @@ samplesPerCode_hi = floor(fs_hi/chip_rate*1023);
 
 chip_rate = 1.023e6;
 
+
 code19_hi = resample_PRN(code19,samplesPerCode_hi,chip_rate,fs_hi,0);
 code19_1 = resample_PRN(code19,samplesPerCode,chip_rate,fs,0);
 
-shift_lo = 500.5%*fs/chip_rate;
+shift_lo = 500.5;
 shift_hi = round(shift_lo*f_ratio);
 shift = shift_lo*chip_rate/fs;
 

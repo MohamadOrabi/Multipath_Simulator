@@ -364,12 +364,12 @@ for n = 1:runs
     if (~NNFlag)
         SamplesData(n,:) = R(round(codeshift.DLL(n))-delta_shift_samples+1 + 1*shift_right:round(codeshift.DLL(n))+delta_shift_samples + 1*shift_right);
         SamplesData_noiseless(n,:) = R_noiseless(round(codeshift.DLL(n))-delta_shift_samples+1:round(codeshift.DLL(n))+delta_shift_samples);
+        shift_right = 1;
     else
         shift_right = 0;
         SamplesData(n,:) = R(round(codeshift.NN(n))-delta_shift_samples+1 + 1*shift_right:round(codeshift.NN(n))+delta_shift_samples+ 1*shift_right);
         %SamplesData(n,:) = SamplesData(n,:)/max(SamplesData(n,:));
         SamplesData_noiseless(n,:) = R_noiseless(round(codeshift.NN(n))-delta_shift_samples+1:round(codeshift.NN(n))+delta_shift_samples);     
-        shift_right = 1;
     end
 
     if (length(code19_Multipath) > 2)
